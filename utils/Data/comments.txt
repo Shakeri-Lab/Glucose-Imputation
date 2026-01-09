@@ -1,0 +1,509 @@
+# import numpy as np
+# from pygrinder import mcar, seq_missing, block_missing
+
+# def create_missing(cgm, rate, pattern='mcar', **kwargs):
+#     """ Create missingness based on patterns. """
+#     assert pattern in ['mcar', 'seq_missing', 'block_missing'], 'pattern should be mcar, seq_missing or block_missing.'
+#     if pattern == 'mcar':
+#         return mcar(cgm, rate)
+#     elif pattern == 'seq_missing':
+#         return seq_missing(np.expand_dims(cgm, axis=0), rate, seq_len=kwargs['seq_len']).squeeze(0)
+#     else:
+#         return block_missing(np.expand_dims(cgm, axis=0), factor=rate, block_len=kwargs['block_len'], block_width=kwargs['block_width']).squeeze(0)
+        
+
+
+
+
+
+# # import torch, math
+# # import numpy as np
+# # import pandas as pd
+# # from .missing import create_missing
+
+# # class CGMDataset:
+# #     """ CGM Dataset preparation. """
+# #     def __init__(self, seq_len, data_dir, miss_cfg, stride=12, data_cols=['cgm'], unique_col='pid', missing_enabled=False):
+# #         self.seq_len = seq_len
+# #         self.stride = stride
+# #         self.data_dir = data_dir
+# #         self.data_cols = data_cols
+# #         self.unique_col = unique_col
+# #         self.miss_cfg = miss_cfg
+# #         self.missing_enabled = missing_enabled
+       
+# #     def load_data(self):
+# #         df = pd.read_csv(self.data_dir)
+# #         return df if set(self.data_cols + [self.unique_col]).issubset(df.columns) else None
+   
+# #     def get_numpy_arrays(self, df):        
+# #         data, pid = [df[col].values for col in self.data_cols], df[self.unique_col].values
+# #         return data, pid
+
+# #     def valid_pid(self, pid, start, length):
+# #         return (pid[start:start + length] == pid[start]).all()
+
+# #     def has_nan(self, arrays, start, length):
+# #         return any(np.isnan(arr[start:start + length]).any() for arr in arrays)
+
+# #     def get_input_slice(self, arrays, start):
+# #         return np.stack([arr[start:start + self.seq_len] for arr in arrays], axis=1)
+
+# #     def skew_norm(self, x, skew, min_val, max_val):
+# #         """Normalize the input x to the range [0, 1] using a skewed function."""
+# #         x = np.array(x) # Ensure input is numpy array
+# #         if x.ndim == 1:
+# #             x = np.expand_dims(x, 0)
+# #         x = np.maximum(np.minimum(x, max_val), min_val)
+# #         return np.power((x - min_val) / (max_val - min_val), skew)
+    
+# #     def build_dataset(self):
+# #         df = self.load_data()
+# #         if df is None: return None, 0
+# #         data, pid = self.get_numpy_arrays(df)
+# #         x_list = []
+        
+# #         for day_start in range(0, len(df) - 288 + 1, 288):
+# #             for i in range(day_start, day_start + 288 - self.seq_len + 1, self.stride):
+# #                 if not self.valid_pid(pid, i, self.seq_len): continue
+# #                 if self.has_nan(data, i, self.seq_len): continue
+    
+# #                 x = self.get_input_slice(data, i)
+# #                 x = self.skew_norm(x, 1, 40, 400)
+# #                 if self.missing_enabled:
+# #                     x = create_missing(x, self.miss_cfg["rate"], self.miss_cfg["pattern"], **{k: v for k, v in self.miss_cfg.items() if k not in ("rate", "pattern")})
+# #                 x_list.append(x)
+    
+# #         x_samples = np.stack(x_list, axis=0).astype(float)
+# #         return x_samples, x_samples.shape[0]
+
+
+
+
+
+
+
+# import torch, math
+# import numpy as np
+# import pandas as pd
+# from torch.utils.data import Dataset
+# from .missing import simulate_missingness_pipeline
+# from .test_missing import simulate_missingness_test_pipeline
+
+# class CGMDataset(Dataset):
+#     def __init__(self, data_path, seq_len=288, stride=12, 
+#                  missing_enabled=True, miss_cfg=None, is_evaluate=False):
+#         self.seq_len = seq_len
+#         self.stride = stride
+#         self.missing_enabled = missing_enabled
+#         self.miss_cfg = miss_cfg or {}
+        
+#         self.df = pd.read_csv(data_path)
+        
+#         if self.missing_enabled:
+#             if not is_evaluate:
+#                 self.df = simulate_missingness_pipeline(
+#                     self.df,
+#                     min_pct=self.miss_cfg.get('min_pct', 0.1),
+#                     max_pct=self.miss_cfg.get('max_pct', 0.3),
+#                     probs=self.miss_cfg.get('probs', {'mnar': 0.5, 'pisa': 0.3, 'mcar': 0.8}),
+#                 )
+#             else:
+#                 self.df = simulate_missingness_test_pipeline(
+#                     self.df,
+#                     max_pct=self.miss_cfg.get('max_pct', 0.3),
+#                     probs=self.miss_cfg.get('probs', {'mnar': 0.5, 'pisa': 0.3, 'mcar': 0.8}),
+#                 )                
+#         else:
+#             self.df['cgm_simulated'] = self.df['cgm'].copy() 
+
+#         self.samples = self._build_samples()
+
+#     def _absolute_time_encoding(self, indices, T_day=288):
+#         t = indices.float() / float(T_day)
+#         return torch.stack([torch.sin(2 * math.pi * t), torch.cos(2 * math.pi * t)], dim=-1)
+
+#     def _skew_norm(self, x, skew=1, min_val=40, max_val=400):
+#         x = np.array(x)
+#         x = np.maximum(np.minimum(x, max_val), min_val)
+#         return np.power((x - min_val) / (max_val - min_val), skew)
+
+#     def _build_samples(self):
+#         samples = []
+#         for pid, group in self.df.groupby('pid'):
+#             in_vals, gt_vals = group['cgm_simulated'].values, group['cgm'].values
+            
+#             dates = pd.to_datetime(group['date'])
+#             time_indices = (dates.dt.hour * 60 + dates.dt.minute) // 5
+#             time_indices = torch.tensor(time_indices.values)
+#             time_embeds = self._absolute_time_encoding(time_indices).numpy()
+
+#             num_points = len(group)
+#             for i in range(0, num_points - self.seq_len + 1, self.stride):
+#                 slice_gt = gt_vals[i : i + self.seq_len]
+#                 if np.isnan(slice_gt).any(): continue
+
+#                 slice_in = in_vals[i : i + self.seq_len]
+#                 slice_time = time_embeds[i : i + self.seq_len]
+                
+#                 # Normalize
+#                 norm_in = self._skew_norm(slice_in) 
+#                 norm_gt = self._skew_norm(slice_gt)
+                
+#                 sample = np.column_stack([norm_in, slice_time, norm_gt]) # [Input, Sin, Cos, Truth]
+#                 samples.append(sample)
+                
+#         return np.array(samples)
+
+#     def __len__(self):
+#         return len(self.samples)
+#     def __getitem__(self, idx):
+#         return torch.FloatTensor(self.samples[idx])
+
+
+
+
+# import torch, math
+# import numpy as np
+# import pandas as pd
+# from torch.utils.data import Dataset
+# from .missing import simulate_missingness_pipeline
+# from .test_missing import simulate_missingness_test_pipeline
+
+# class CGMDataset(Dataset):
+#     def __init__(self, data_path, seq_len=288, stride=12, 
+#                  missing_enabled=True, miss_cfg=None, is_evaluate=False, is_dclp3=False):
+#         self.seq_len = seq_len
+#         self.stride = stride
+#         self.missing_enabled = missing_enabled
+#         self.miss_cfg = miss_cfg or {}
+        
+#         self.df = pd.read_csv(data_path)
+        
+#         if self.missing_enabled:
+#             if not is_evaluate:
+#                 self.df = simulate_missingness_pipeline(
+#                     self.df,
+#                     min_pct=self.miss_cfg.get('min_pct', 0.1),
+#                     max_pct=self.miss_cfg.get('max_pct', 0.3),
+#                     probs=self.miss_cfg.get('probs', {'mnar': 0.5, 'pisa': 0.3, 'mcar': 0.8}),
+#                 )
+#             else:
+#                 self.df = simulate_missingness_test_pipeline(
+#                     self.df,
+#                     max_pct=self.miss_cfg.get('max_pct', 0.3),
+#                     probs=self.miss_cfg.get('probs', {'mnar': 0.5, 'pisa': 0.3, 'mcar': 0.8}),
+#                 )                
+#         else:
+#             self.df['cgm_simulated'] = self.df['cgm'].copy() 
+
+#         self.samples = self._build_samples_dclp3() if is_dclp3 else self._build_samples()
+
+#     def _absolute_time_encoding(self, indices, T_day=288):
+#         t = indices.float() / float(T_day)
+#         return torch.stack([torch.sin(2 * math.pi * t), torch.cos(2 * math.pi * t)], dim=-1)
+
+#     def _skew_norm(self, x, skew=1, min_val=40, max_val=400):
+#         x = np.array(x)
+#         x = np.maximum(np.minimum(x, max_val), min_val)
+#         return np.power((x - min_val) / (max_val - min_val), skew)
+
+#     def _build_samples_dclp3(self):
+#         samples = []
+#         for pid, group in self.df.groupby('pat_id'):
+#             for seq_id, episode in group.groupby('seq_id'):
+#                 in_vals, gt_vals = episode['cgm_simulated'].values, episode['cgm'].values
+                
+#                 dates = pd.to_datetime(episode['date'])
+#                 time_indices = (dates.dt.hour * 60 + dates.dt.minute) // 5
+#                 time_indices = torch.tensor(time_indices.values)
+#                 time_embeds = self._absolute_time_encoding(time_indices).numpy()
+    
+#                 num_points = len(episode)
+#                 for i in range(0, num_points - self.seq_len + 1, self.stride):
+#                     slice_gt = gt_vals[i : i + self.seq_len]
+#                     if np.isnan(slice_gt).any(): continue
+    
+#                     slice_in = in_vals[i : i + self.seq_len]
+#                     slice_time = time_embeds[i : i + self.seq_len]
+                    
+#                     # Normalize
+#                     norm_in = self._skew_norm(slice_in) 
+#                     norm_gt = self._skew_norm(slice_gt)
+                    
+#                     sample = np.column_stack([norm_in, slice_time, norm_gt]) # [Input, Sin, Cos, Truth]
+#                     samples.append(sample)
+                
+#         return np.array(samples)
+
+#     def _build_samples(self):
+#         samples = []
+#         for pid, group in self.df.groupby('pid'):
+#             in_vals, gt_vals = group['cgm_simulated'].values, group['cgm'].values
+            
+#             dates = pd.to_datetime(group['date'])
+#             time_indices = (dates.dt.hour * 60 + dates.dt.minute) // 5
+#             time_indices = torch.tensor(time_indices.values)
+#             time_embeds = self._absolute_time_encoding(time_indices).numpy()
+
+#             num_points = len(group)
+#             for i in range(0, num_points - self.seq_len + 1, self.stride):
+#                 slice_gt = gt_vals[i : i + self.seq_len]
+#                 if np.isnan(slice_gt).any(): continue
+
+#                 slice_in = in_vals[i : i + self.seq_len]
+#                 slice_time = time_embeds[i : i + self.seq_len]
+                
+#                 # Normalize
+#                 norm_in = self._skew_norm(slice_in) 
+#                 norm_gt = self._skew_norm(slice_gt)
+                
+#                 sample = np.column_stack([norm_in, slice_time, norm_gt]) # [Input, Sin, Cos, Truth]
+#                 samples.append(sample)
+                
+#         return np.array(samples)
+
+    
+#     def __len__(self):
+#         return len(self.samples)
+#     def __getitem__(self, idx):
+#         return torch.FloatTensor(self.samples[idx])
+
+
+
+
+
+
+# import torch
+# import math
+# import numpy as np
+# import pandas as pd
+
+
+# def apply_mnar_values(drop_mask, day_df, max_points):
+#     """
+#     Simulates NMAR (Not Missing At Random) by masking values based on their 
+#     actual glucose level (High > 150 or Low < 70).
+#     """
+#     #    Thresholds: < 70 mg/dL or > 150 mg/dL 
+#     triggers = day_df[(day_df['cgm'] > 150) | (day_df['cgm'] < 70)].index.tolist()
+#     np.random.shuffle(triggers)
+    
+#     for trigger_idx in triggers:
+#         if drop_mask.sum() >= max_points:
+#             break
+            
+#         loc_idx = day_df.index.get_loc(trigger_idx)
+#         duration = int(np.random.randint(30, 90) / 5)
+        
+#         # Calculate remaining quota to avoid over-masking
+#         remaining = max_points - drop_mask.sum()
+#         if duration > remaining:
+#             duration = remaining
+            
+#         if duration > 0:
+#             end_loc = min(loc_idx + duration, len(day_df))
+#             drop_mask[loc_idx : end_loc] = True
+            
+#     return drop_mask
+
+
+# def apply_mar_pisa(drop_mask, day_df, max_points):
+#     """ PISA simulation. """
+#     remaining = max_points - drop_mask.sum()
+#     if remaining <= 0: return drop_mask
+
+#     # Define sleep mask
+#     is_sleep = (day_df['date'].dt.hour <= 7) | (day_df['date'].dt.hour >= 23)
+#     sleep_pos = np.where(is_sleep)[0]
+    
+#     if len(sleep_pos) > 0:
+#         pisa_start = np.random.choice(sleep_pos)
+#         duration = int(np.random.randint(20, 60) / 5)
+        
+#         if duration > remaining: duration = remaining
+        
+#         if duration > 0:
+#             end_loc = min(pisa_start + duration, len(day_df))
+#             intended_window = is_sleep.iloc[pisa_start : end_loc]
+            
+#             if (~intended_window).any():
+#                 first_wake_idx = np.where(~intended_window)[0][0]
+#                 end_loc = pisa_start + first_wake_idx
+            
+#             # Apply mask
+#             drop_mask[pisa_start : end_loc] = True
+            
+#     return drop_mask
+
+
+# def apply_mcar_random_noise(drop_mask, min_points, max_points):
+#     """ Randomly Noises. """
+#     current_drops = drop_mask.sum()
+#     needed = 0
+    
+#     if current_drops < min_points:
+#         needed = min_points - current_drops
+#     elif current_drops < max_points:
+#         remaining = max_points - current_drops
+#         needed = int(np.random.rand() * remaining * 0.2)
+        
+#     if needed > 0:
+#         safe_pos = np.where(drop_mask == False)[0]
+#         needed = min(needed, len(safe_pos))
+#         if needed > 0:
+#             mcar_pos = np.random.choice(safe_pos, size=needed, replace=False)
+#             drop_mask[mcar_pos] = True
+#     return drop_mask
+
+# def process_single_day(day_df, min_pct, max_pct, probs):
+#     df_day = day_df.copy()
+#     total_points = len(df_day)
+#     drop_mask = np.zeros(total_points, dtype=bool)
+    
+#     max_points = int(total_points * max_pct)
+#     min_points = int(total_points * min_pct)
+    
+#     active_mnar     = np.random.rand() < probs.get('mnar', 0.5)
+#     active_pisa     = np.random.rand() < probs.get('pisa', 0.3)
+#     active_mcar     = np.random.rand() < probs.get('mcar', 0.8)
+    
+#     if not (active_mnar or active_pisa or active_mcar):
+#         return df_day
+#     # Apply Logic
+#     if active_mnar:
+#         drop_mask = apply_mnar_values(drop_mask, df_day, max_points)
+#     if active_pisa:
+#         drop_mask = apply_mar_pisa(drop_mask, df_day, max_points)
+#     if active_mcar:
+#         drop_mask = apply_mcar_random_noise(drop_mask, min_points, max_points)
+
+#     col_loc = df_day.columns.get_loc('cgm_simulated')
+#     df_day.iloc[drop_mask, col_loc] = np.nan
+#     return df_day
+
+# def simulate_missingness_pipeline(df, min_pct, max_pct, probs):
+#     df = df.copy()
+#     if not pd.api.types.is_datetime64_any_dtype(df['date']):
+#         df['date'] = pd.to_datetime(df['date'])
+    
+#     df['cgm_simulated'] = df['cgm'].copy()
+    
+#     def process_patient(patient_df):
+#         day_groups = patient_df.groupby(patient_df['date'].dt.date)
+#         results = []
+#         for date, day_data in day_groups:
+#             processed_day = process_single_day(day_data, min_pct, max_pct, probs)
+#             results.append(processed_day)
+#         return pd.concat(results)
+
+#     if 'pid' in df.columns:
+#         final_df = df.groupby('pid').apply(process_patient).reset_index(drop=True)
+#     else:
+#         final_df = process_patient(df)
+#     return final_df
+
+
+
+
+
+# import torch, math
+# import numpy as np
+# import pandas as pd
+# from torch.utils.data import Dataset
+# from .missing import simulate_missingness_pipeline
+
+# class CGMDataset(Dataset):
+#     def __init__(self, data_path, seq_len=288, stride=12, 
+#                  missing_enabled=True, miss_cfg=None, is_dclp3=False):
+#         self.seq_len = seq_len
+#         self.stride = stride
+#         self.missing_enabled = missing_enabled
+#         self.miss_cfg = miss_cfg or {}
+        
+#         self.df = pd.read_csv(data_path)
+        
+#         if self.missing_enabled:
+#             self.df = simulate_missingness_pipeline(
+#                 self.df,
+#                 max_pct=self.miss_cfg.get('max_pct', 0.3),
+#                 probs=self.miss_cfg.get('probs', {'mnar': 0.5, 'meal': 0.3, 'mcar': 0.8}),
+#             )                
+#         else:
+#             self.df['cgm_simulated'] = self.df['cgm'].copy() 
+
+#         self.samples = self._build_samples_dclp3() if is_dclp3 else self._build_samples()
+
+#     def _absolute_time_encoding(self, indices, T_day=288):
+#         t = indices.float() / float(T_day)
+#         return torch.stack([torch.sin(2 * math.pi * t), torch.cos(2 * math.pi * t)], dim=-1)
+
+#     def _skew_norm(self, x, skew=1, min_val=40, max_val=400):
+#         x = np.array(x)
+#         x = np.maximum(np.minimum(x, max_val), min_val)
+#         return np.power((x - min_val) / (max_val - min_val), skew)
+
+#     def _build_samples_dclp3(self):
+#         samples = []
+#         for pid, group in self.df.groupby('pat_id'):
+#             for seq_id, episode in group.groupby('seq_id'):
+#                 in_vals, gt_vals = episode['cgm_simulated'].values, episode['cgm'].values
+#                 meal_vals = np.where(episode['meal'].values > 0, 1, 0)
+                
+#                 dates = pd.to_datetime(episode['date'])
+#                 time_indices = (dates.dt.hour * 60 + dates.dt.minute) // 5
+#                 time_indices = torch.tensor(time_indices.values)
+#                 time_embeds = self._absolute_time_encoding(time_indices).numpy()
+    
+#                 num_points = len(episode)
+#                 for i in range(0, num_points - self.seq_len + 1, self.stride):
+#                     slice_gt = gt_vals[i : i + self.seq_len]
+#                     if np.isnan(slice_gt).any(): continue
+    
+#                     slice_in = in_vals[i : i + self.seq_len]
+#                     slice_meal = meal_vals[i : i + self.seq_len]
+#                     slice_time = time_embeds[i : i + self.seq_len]
+                    
+#                     # Normalize
+#                     norm_in = self._skew_norm(slice_in) 
+#                     norm_gt = self._skew_norm(slice_gt)
+                    
+#                     sample = np.column_stack([norm_in, slice_meal, slice_time, norm_gt]) # [Input, Sin, Cos, Truth]
+#                     samples.append(sample)
+                
+#         return np.array(samples)
+
+#     def _build_samples(self):
+#         samples = []
+#         for pid, group in self.df.groupby('pid'):
+#             in_vals, gt_vals = group['cgm_simulated'].values, group['cgm'].values
+#             meal_vals = np.where(group['meal'].values > 0, 1, 0)
+            
+#             dates = pd.to_datetime(group['date'])
+#             time_indices = (dates.dt.hour * 60 + dates.dt.minute) // 5
+#             time_indices = torch.tensor(time_indices.values)
+#             time_embeds = self._absolute_time_encoding(time_indices).numpy()
+
+#             num_points = len(group)
+#             for i in range(0, num_points - self.seq_len + 1, self.stride):
+#                 slice_gt = gt_vals[i : i + self.seq_len]
+#                 if np.isnan(slice_gt).any(): continue
+
+#                 slice_in = in_vals[i : i + self.seq_len]
+#                 slice_meal = meal_vals[i : i + self.seq_len]
+#                 slice_time = time_embeds[i : i + self.seq_len]
+                
+#                 # Normalize
+#                 norm_in = self._skew_norm(slice_in) 
+#                 norm_gt = self._skew_norm(slice_gt)
+                
+#                 sample = np.column_stack([norm_in, slice_meal, slice_time, norm_gt]) # [Input, Sin, Cos, Truth]
+#                 samples.append(sample)
+                
+#         return np.array(samples)
+
+    
+#     def __len__(self):
+#         return len(self.samples)
+#     def __getitem__(self, idx):
+#         return torch.FloatTensor(self.samples[idx])
