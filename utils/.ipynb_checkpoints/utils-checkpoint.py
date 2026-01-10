@@ -24,58 +24,53 @@ def set_seed(seed=42):
     # Optional: for full determinism in certain PyTorch versions
     os.environ["PYTHONHASHSEED"] = str(seed)
 
+
 # def load_data(args):
 #     """ Load dataset. """
 #     logging.info(f"Loading dataset from {args.data_path}")
 #     all_dataset_dict = {'org': None, 'missed': None}
+    
 #     for keys in all_dataset_dict.keys():       
 #         data_dict = {}
-#         dataset = CGMDataset(data_path=args.data_path, seq_len=args.seq_len, stride=args.stride, 
-#                              missing_enabled=(keys == 'missed'), miss_cfg=args.miss_config, is_evaluate=args.is_evaluate)
-#         num_samples = len(dataset)
 #         for splt in ['train', 'val', 'test']:
-#             if splt == 'train':
-#                 start, end = 0, int(num_samples * 0.8)
-#                 sub_dataset = dataset[start:end]
-#             elif splt == 'val':
-#                 start, end = int(num_samples * 0.8), int(num_samples * 0.9)
-#                 sub_dataset = dataset[start:end]
-#             else:
-#                 start = int(num_samples * 0.9)
-#                 sub_dataset = dataset[start:]
-
-#             signal = sub_dataset[:, :, 0] if keys == 'missed' else sub_dataset[:, :, 3]                
-#             signal, time_embed = signal.unsqueeze(-1), sub_dataset[:, :, 1:3] 
+#             sub_dataset = CGMDataset(data_path=os.path.join(args.data_path, splt + '.csv'), seq_len=args.seq_len, stride=args.stride, missing_enabled=True, miss_cfg=args.miss_config, is_dclp3=args.is_dclp3)
             
-#             sub_dataset = torch.cat([signal, time_embed], dim=2)
+#             signal = sub_dataset[:, :, 0] if keys == 'missed' else sub_dataset[:, :, -1]                
+#             print(sub_dataset[:, :, 0].shape)
+#             signal, meal, time_embed = signal.unsqueeze(-1), sub_dataset[:, :, 1].unsqueeze(-1), sub_dataset[:, :, 2:4] 
+            
+#             sub_dataset = torch.cat([signal, meal, time_embed], dim=2)
 #             data_dict[splt] = sub_dataset
-            
+
 #         all_dataset_dict[keys] = data_dict
 
 #     return all_dataset_dict
 
 
 
-
 def load_data(args):
     """ Load dataset. """
-    logging.info(f"Loading dataset from {args.data_path}")
-    all_dataset_dict = {'org': None, 'missed': None}
-    
-    for keys in all_dataset_dict.keys():       
-        data_dict = {}
-        for splt in ['train', 'val', 'test']:
-            sub_dataset = CGMDataset(data_path=os.path.join(args.data_path, splt + '.csv'), seq_len=args.seq_len, stride=args.stride, missing_enabled=True, miss_cfg=args.miss_config, is_dclp3=args.is_dclp3)
-            
-            signal = sub_dataset[:, :, 0] if keys == 'missed' else sub_dataset[:, :, -1]                
-            signal, meal, time_embed = signal.unsqueeze(-1), sub_dataset[:, :, 1].unsqueeze(-1), sub_dataset[:, :, 2:4] 
-            
-            sub_dataset = torch.cat([signal, meal, time_embed], dim=2)
-            data_dict[splt] = sub_dataset
+    logging.info(f"Loading dataset from {args.data_path}")    
+    all_dataset_dict = {'org': {}, 'missed': {}}    
+    for splt in ['train', 'val', 'test']:
+        raw_dataset = CGMDataset(data_path=os.path.join(args.data_path, splt + '.csv'), seq_len=args.seq_len, stride=args.stride, missing_enabled=True, miss_cfg=args.miss_config, is_dclp3=args.is_dclp3)
+        
+        meal = raw_dataset[:, :, 1].unsqueeze(-1)
+        time_embed = raw_dataset[:, :, 2:4]
 
-        all_dataset_dict[keys] = data_dict
+        for key in ['org', 'missed']:
+            if key == 'missed':
+                raw_signal = raw_dataset[:, :, 0]
+            else:
+                raw_signal = raw_dataset[:, :, -1]
+
+            signal = raw_signal.unsqueeze(-1)
+            processed_data = torch.cat([signal, meal, time_embed], dim=2)            
+            all_dataset_dict[key][splt] = processed_data
 
     return all_dataset_dict
+
+
 
 
 

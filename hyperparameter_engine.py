@@ -4,7 +4,7 @@ from hyperparameter_optuna import HyperParameter
 from pypots.utils.random import set_random_seed
 from train import engine
 import os 
-# python hyperparameter_engine.py --model_name GPVAE --ParamRangeDir param_range.json --StoreBestDir results --config-path config.yml --NTrials 3
+# python hyperparameter_engine.py --model_name SAITS --ParamRangeDir param_range.json --config-path config.yml --NTrials 3
 def parse_args():
     """
     read config file and extract args.

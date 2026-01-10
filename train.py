@@ -60,8 +60,7 @@ def init_hyperparameters(args, suggest_hp):
     """ Init hyperparameters. """
     round_saving_path = os.path.join(args.saving_path, args.model)
     args.plot_dir = os.path.join(round_saving_path, 'plots')
-    if not os.path.exists(round_saving_path):
-        os.makedirs(round_saving_path)
+    if not os.path.exists(round_saving_path): os.makedirs(round_saving_path)
 
     hyperparameters = init_configs[args.model].copy()
     
@@ -161,13 +160,13 @@ def engine(args, suggest_hp):
     """ Train, and test model. """
     try:
         model, dataset_dict, hyperparameters = init_training(args, suggest_hp)   
-
+        
         if args.model not in ['Lerp', 'Mean', 'Median', 'LOCF']:
             if args.is_evaluate:
-                model.load(os.path.join(os.path.dirname(args.saving_path), args.model, 'best_model.pypots'))
-            else:
+                model.load(os.path.join(args.saving_path, args.model, 'best_model.pypots'))
+            if not args.is_evaluate:
                 model.fit(train_set={"X": dataset_dict[0]['X']}, val_set=dataset_dict[1])
-            if args.train_best: model.save(os.path.join(os.path.dirname(args.saving_path), args.model, 'best_model'))
+            if args.train_best: model.save(os.path.join(args.saving_path, args.model, 'best_model'))
 
         if args.model in ["CSDI", "GPVAE"]:
             results = model.predict({"X": dataset_dict[2]['X']}, n_sampling_times=10)

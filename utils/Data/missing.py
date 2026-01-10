@@ -42,7 +42,7 @@ def apply_mar_meal(drop_mask, day_df, max_points):
     """ 
     Meal simulation: Drops data segments starting at meal times.
     """
-    triggers = np.where(day_df['meal'] == 1)[0]
+    triggers = np.where(day_df['meal'] != 0.0)[0]
     np.random.shuffle(triggers)    
     triggers = list(triggers) 
 

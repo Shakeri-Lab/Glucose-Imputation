@@ -47,8 +47,11 @@ class HyperParameter:
         """
         Find the best config among different trials
         """
-        study = optuna.create_study(direction="minimize") # create study
-        study.optimize(self.objective, n_trials=self.n_trials) # start optimizing
+        os.makedirs(self.store_best_dir, exist_ok=True)        
+        db_path = os.path.join(self.store_best_dir, 'optuna.db')
+        
+        study = optuna.create_study(study_name='imputation', storage= f"sqlite:///{db_path}", load_if_exists=True, direction="minimize") # create study
+        study.optimize(self.objective, n_trials=self.n_trials - len(study.trials)) # start optimizing
         best_trial = study.best_trial # select the best hyperparameters
         print(f"Best loss: {best_trial.value:.6f}")
         
@@ -57,4 +60,4 @@ class HyperParameter:
         
         os.makedirs(self.store_best_dir, exist_ok=True)
         with open(os.path.join(self.store_best_dir, 'best_hyperparameter.json'), 'w') as f: json.dump(args_dict, f, indent=4) # indent for pretty-printing
-        
+
