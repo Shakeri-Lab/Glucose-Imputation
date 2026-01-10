@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=10
 #SBATCH --gres=gpu:1
 #SBATCH --mem=100000
-#SBATCH --time=48:00:00
+#SBATCH --time=72:00:00
 #SBATCH --partition=gpu
 #SBATCH -A shakeri-lab
 #SBATCH --array=0-9
@@ -15,7 +15,7 @@
 # MODEL_NAMES=("TimeMixer" "TimeMixerPP" "ModernTCN" "TSLANet" "TEFN" "TOTEM" "GPT4TS")
 MODEL_NAMES=("SAITS" "FreTS" "CSDI" "SCINet" "TimeMixer" "TimeMixerPP" "TSLANet" "TEFN" "TOTEM" "GPT4TS")
 # MODEL_NAMES=("SAITS" "FreTS" "SCINet" "TimeMixer" "TSLANet" "TEFN" "TOTEM" "GPT4TS")
-# MODEL_NAMES=("CSDI")
+# MODEL_NAMES=("SAITS")
 
 PARAM_RANGE_FILE="param_range.json"
 CONFIG_FILE="config.yml"
