@@ -1,114 +1,110 @@
-import torch
-import math
 import numpy as np
 import pandas as pd
 
-def apply_mnar_values(drop_mask, day_df, max_points):
+def apply_protocol_A_homeostatic(drop_mask, day_df, missing_config, POINTS_PER_HOUR=12):
     """
-    Simulates MNAR by masking ONLY contiguous Hyper/Hypo values.
+    Protocol A: Steady-State Mask.
+    Fills stable areas with RANDOM window lengths (within a range)
+    until the Total Target is met.
     """
-    cgm_values = day_df['cgm'].values
-    is_extreme = (cgm_values > 150) | (cgm_values < 70)
+    T = len(day_df)
+    cgm_values, meal_values = day_df['cgm'].values, day_df['meal'].values
     
-    triggers = np.where(is_extreme)[0].tolist()
-    np.random.shuffle(triggers)
+    MIN_WINDOW_LEN, MAX_WINDOW_LEN = int(1.0 * POINTS_PER_HOUR), int(2.0 * POINTS_PER_HOUR) 
+    min_total_points, max_total_points = int(T * missing_config['min']), int(T * missing_config['max'])
+    target_total_points = np.random.randint(min_total_points, max_total_points + 1)
 
-    T = len(day_df)
-    remaining = max_points - drop_mask.sum()
-    if remaining <= 0: return drop_mask
-
-    while remaining > 0 and len(triggers) > 0:
-        loc_idx = triggers.pop()       
-        
-        if drop_mask[loc_idx]: continue
-        L_max = np.random.randint(1, remaining + 1)        
-        points_masked_in_this_loop = 0
-        
-        for i in range(L_max):
-            curr = loc_idx + i
+    valid_starts = []
+    gradients = np.abs(np.gradient(cgm_values))
+    is_stable = gradients < 2.0 
+    
+    for t in range(T - MAX_WINDOW_LEN):
+        window_meal = meal_values[t : t + MAX_WINDOW_LEN]
+        window_stable = is_stable[t : t + MAX_WINDOW_LEN]
+        if (np.sum(window_meal) == 0) and (np.mean(window_stable) > 0.8): valid_starts.append(t)
             
-            if curr >= T: break
-            if not is_extreme[curr]: break
-            if drop_mask[curr]: break
-
-            drop_mask[curr] = True
-            points_masked_in_this_loop += 1
+    if not valid_starts: return drop_mask 
+    points_added = 0
+    np.random.shuffle(valid_starts)
+    for start_idx in valid_starts:
+        if points_added >= target_total_points: break
+        current_window_len = np.random.randint(MIN_WINDOW_LEN, MAX_WINDOW_LEN + 1)        
+        end_idx = start_idx + current_window_len
         
-        remaining -= points_masked_in_this_loop
+        if not drop_mask[start_idx : end_idx].any():
+            if (points_added + current_window_len) <= target_total_points:
+                drop_mask[start_idx : end_idx] = True
+                points_added += current_window_len
+                
+    return drop_mask
+
+def apply_protocol_B_hidden_peak(drop_mask, day_df, missing_config, POINTS_PER_HOUR=12):
+    """
+    Protocol B: Hidden Peak Mask.
+    Masks post-prandial peaks with RANDOM window lengths centered on the peak.
+    """
+    T, cgm_values = len(day_df), day_df['cgm'].values
+    
+    MIN_WINDOW_LEN, MAX_WINDOW_LEN = int(2.5 * POINTS_PER_HOUR), int(3.0 * POINTS_PER_HOUR) 
+    min_total_points, max_total_points = int(T * missing_config['min']), int(T * missing_config['max'])
+    target_total_points = np.random.randint(min_total_points, max_total_points + 1)
+
+    peak_candidates = []
+    for meal_idx in np.where(day_df['meal'] > 0)[0]:
+        search_end = min(meal_idx + 24, T)
+        if search_end > meal_idx: peak_candidates.append(meal_idx + np.argmax(cgm_values[meal_idx : search_end]))
+
+    if not peak_candidates: return drop_mask
+    points_added = 0
+    np.random.shuffle(peak_candidates)
+    for peak_idx in peak_candidates:
+        if points_added >= target_total_points: break
+
+        current_window_len = np.random.randint(MIN_WINDOW_LEN, MAX_WINDOW_LEN + 1)
+        start_idx = max(0, peak_idx - (current_window_len // 2))
+        end_idx = min(T, start_idx + current_window_len)
+        actual_len = end_idx - start_idx
+
+        if not drop_mask[start_idx : end_idx].any():
+            if (points_added + actual_len) <= target_total_points:
+                drop_mask[start_idx : end_idx] = True
+                points_added += actual_len
 
     return drop_mask
 
-def apply_mar_meal(drop_mask, day_df, max_points):
-    """ 
-    Meal simulation: Drops data segments starting at meal times.
+def process_single_day_experiment(day_df, experiment_mode='A'):
     """
-    triggers = np.where(day_df['meal'] != 0.0)[0]
-    np.random.shuffle(triggers)    
-    triggers = list(triggers) 
-
-    T = len(day_df)
-    remaining = max_points - drop_mask.sum()
-    if remaining <= 0: return drop_mask
-
-    while remaining > 0 and len(triggers) > 0:
-        start_idx = triggers.pop()
-        L = np.random.randint(1, remaining + 1)
-        
-        if start_idx + L > T: continue
-        if drop_mask[start_idx : start_idx + L].any(): continue
-        drop_mask[start_idx : start_idx + L] = True
-        remaining -= L
-
-    return drop_mask
-
-
-def apply_mcar_random_noise(drop_mask, max_points):
+    Master function to apply specific experimental protocols.
     """
-    MCAR with exact total missing = max_points
-    """
-    current = drop_mask.sum()
-    remaining = max_points - current
-    if remaining <= 0: return drop_mask
-
-    safe_pos = np.where(~drop_mask)[0]
-    remaining = min(remaining, len(safe_pos))
-
-    if remaining > 0:
-        mcar_pos = np.random.choice(safe_pos, size=remaining, replace=False)
-        drop_mask[mcar_pos] = True
-
-    return drop_mask
-
-
-def process_single_day(day_df, max_pct, probs):
     df_day = day_df.copy()
     total_points = len(df_day)
     drop_mask = np.zeros(total_points, dtype=bool)
     
-    max_points = int(total_points * max_pct)
+    config_A = {'min': 0.10, 'max': 0.15}
+    config_B = {'min': 0.20, 'max': 0.30}
     
-    active_mnar     = np.random.rand() < probs.get('mnar', 0.5)
-    active_meal     = np.random.rand() < probs.get('meal', 0.3)
-    active_mcar     = np.random.rand() < probs.get('mcar', 0.8)
+    if experiment_mode == 'A':
+        drop_mask = apply_protocol_A_homeostatic(drop_mask, df_day, config_A)
+    elif experiment_mode == 'B':
+        drop_mask = apply_protocol_B_hidden_peak(drop_mask, df_day, config_B)
+    elif experiment_mode == 'Mixed':
+        choice_prob = np.random.rand()
+        if choice_prob < 0.2:
+            drop_mask = apply_protocol_A_homeostatic(drop_mask, df_day, config_A)
+        elif choice_prob < 0.5:
+            drop_mask = apply_protocol_B_hidden_peak(drop_mask, df_day, config_B)
+        else:
+            drop_mask = apply_protocol_A_homeostatic(drop_mask, df_day, config_A)
+            drop_mask = apply_protocol_B_hidden_peak(drop_mask, df_day, config_B)
+            
+    if 'cgm_simulated' in df_day.columns:
+        col_loc = df_day.columns.get_loc('cgm_simulated')
+        df_day.iloc[drop_mask, col_loc] = np.nan
     
-    if not (active_mnar or active_meal or active_mcar): return df_day
-
-    # Apply Logic
-    if active_mnar:
-        drop_mask = apply_mnar_values(drop_mask, df_day, max_points)
-    if active_meal:
-        drop_mask = apply_mar_meal(drop_mask, df_day, max_points)
-    if active_mcar:
-        drop_mask = apply_mcar_random_noise(drop_mask, max_points)
-
-    if drop_mask.sum() != max_points: return None
-    
-    col_loc = df_day.columns.get_loc('cgm_simulated')
-    df_day.iloc[drop_mask, col_loc] = np.nan
     return df_day
 
-
-def simulate_missingness_pipeline(df, max_pct, probs):
+def simulate_experiment_pipeline(df, mode='Mixed'):
     df = df.copy()
-    df['cgm_simulated'] = df['cgm'].copy()    
-    return process_single_day(df, max_pct, probs)
+    if 'cgm_simulated' not in df.columns:
+        df['cgm_simulated'] = df['cgm'].copy()
+    return process_single_day_experiment(df, experiment_mode=mode)

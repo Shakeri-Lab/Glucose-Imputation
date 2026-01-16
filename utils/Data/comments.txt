@@ -507,3 +507,289 @@
 #         return len(self.samples)
 #     def __getitem__(self, idx):
 #         return torch.FloatTensor(self.samples[idx])
+
+
+
+
+
+
+
+
+# # import torch
+# # import math
+# # import numpy as np
+# # import pandas as pd
+
+# # def apply_mnar_values(drop_mask, day_df, max_points):
+# #     """
+# #     Simulates MNAR by masking ONLY contiguous Hyper/Hypo values.
+# #     """
+# #     cgm_values = day_df['cgm'].values
+# #     is_extreme = (cgm_values > 150) | (cgm_values < 70)
+    
+# #     triggers = np.where(is_extreme)[0].tolist()
+# #     np.random.shuffle(triggers)
+
+# #     T = len(day_df)
+# #     remaining = max_points - drop_mask.sum()
+# #     if remaining <= 0: return drop_mask
+
+# #     while remaining > 0 and len(triggers) > 0:
+# #         loc_idx = triggers.pop()       
+        
+# #         if drop_mask[loc_idx]: continue
+# #         L_max = np.random.randint(1, remaining + 1)        
+# #         points_masked_in_this_loop = 0
+        
+# #         for i in range(L_max):
+# #             curr = loc_idx + i
+            
+# #             if curr >= T: break
+# #             if not is_extreme[curr]: break
+# #             if drop_mask[curr]: break
+
+# #             drop_mask[curr] = True
+# #             points_masked_in_this_loop += 1
+        
+# #         remaining -= points_masked_in_this_loop
+
+# #     return drop_mask
+
+# # # def apply_mar_meal(drop_mask, day_df, max_points):
+# # #     """ 
+# # #     Meal simulation: Drops data segments starting at meal times.
+# # #     """
+# # #     triggers = np.where(day_df['meal'] != 0.0)[0]
+# # #     np.random.shuffle(triggers)    
+# # #     triggers = list(triggers) 
+
+# # #     T = len(day_df)
+# # #     remaining = max_points - drop_mask.sum()
+# # #     if remaining <= 0: return drop_mask
+
+# # #     while remaining > 0 and len(triggers) > 0:
+# # #         start_idx = triggers.pop()
+# # #         L = np.random.randint(1, remaining + 1)
+        
+# # #         if start_idx + L > T: continue
+# # #         if drop_mask[start_idx : start_idx + L].any(): continue
+# # #         drop_mask[start_idx : start_idx + L] = True
+# # #         remaining -= L
+
+# # #     return drop_mask
+
+
+
+
+# # def apply_mar_meal(drop_mask, day_df, max_points):
+# #     """ 
+# #     HARD MODE MEAL SIMULATION
+# #     """
+# #     meal_indices = np.where(day_df['meal'] > 0)[0]
+# #     if len(meal_indices) == 0: return drop_mask 
+
+# #     largest_meal_idx = meal_indices[np.argmax(day_df.iloc[meal_indices]['meal'].values)]
+# #     current_masked = drop_mask.sum()
+# #     gap_points = max_points - current_masked
+    
+# #     if gap_points <= 0: return drop_mask
+
+# #     start = largest_meal_idx
+# #     end = min(start + gap_points, len(day_df))
+    
+# #     drop_mask[start:end] = True
+    
+# #     return drop_mask
+
+
+
+
+
+
+
+
+
+
+
+# # def apply_mcar_random_noise(drop_mask, max_points):
+# #     """
+# #     MCAR with exact total missing = max_points
+# #     """
+# #     current = drop_mask.sum()
+# #     remaining = max_points - current
+# #     if remaining <= 0: return drop_mask
+
+# #     safe_pos = np.where(~drop_mask)[0]
+# #     remaining = min(remaining, len(safe_pos))
+
+# #     if remaining > 0:
+# #         mcar_pos = np.random.choice(safe_pos, size=remaining, replace=False)
+# #         drop_mask[mcar_pos] = True
+
+# #     return drop_mask
+
+
+# # def process_single_day(day_df, max_pct, probs):
+# #     df_day = day_df.copy()
+# #     total_points = len(df_day)
+# #     drop_mask = np.zeros(total_points, dtype=bool)
+    
+# #     max_points = int(total_points * max_pct)
+    
+# #     active_mnar     = np.random.rand() < probs.get('mnar', 0.5)
+# #     active_meal     = np.random.rand() < probs.get('meal', 0.3)
+# #     active_mcar     = np.random.rand() < probs.get('mcar', 0.8)
+    
+# #     if not (active_mnar or active_meal or active_mcar): return df_day
+
+# #     # Apply Logic
+# #     if active_mnar:
+# #         drop_mask = apply_mnar_values(drop_mask, df_day, max_points)
+# #     if active_meal:
+# #         drop_mask = apply_mar_meal(drop_mask, df_day, max_points)
+# #     if active_mcar:
+# #         drop_mask = apply_mcar_random_noise(drop_mask, max_points)
+
+# #     if drop_mask.sum() != max_points: return None
+    
+# #     col_loc = df_day.columns.get_loc('cgm_simulated')
+# #     df_day.iloc[drop_mask, col_loc] = np.nan
+# #     return df_day
+
+
+# # def simulate_missingness_pipeline(df, max_pct, probs):
+# #     df = df.copy()
+# #     df['cgm_simulated'] = df['cgm'].copy()    
+# #     return process_single_day(df, max_pct, probs)
+
+
+
+# import numpy as np
+# import pandas as pd
+
+# POINTS_PER_HOUR = 12  
+# MASK_WINDOW = int(1.5 * POINTS_PER_HOUR)  
+
+# def apply_protocol_A_homeostatic(drop_mask, day_df):
+#     """
+#     Protocol A: The 'Steady-State' Mask (Homeostatic Regime).
+#     Target: Windows defined by metabolic stability (Sleep or Fasting).
+#     Condition: No meals (u_t = 0) and low variance.
+#     Action: Mask 90-minute segments.
+#     """
+#     cgm_values = day_df['cgm'].values
+#     meal_values = day_df['meal'].values
+#     T = len(day_df)
+    
+#     valid_starts = []
+    
+#     gradients = np.abs(np.gradient(cgm_values))
+#     is_stable = gradients < 2.0 
+    
+#     for t in range(T - MASK_WINDOW):
+#         window_meal = meal_values[t : t + MASK_WINDOW]
+#         window_stable = is_stable[t : t + MASK_WINDOW]
+        
+#         if (np.sum(window_meal) == 0) and (np.mean(window_stable) > 0.8):
+#             valid_starts.append(t)
+            
+#     if not valid_starts: return drop_mask 
+    
+#     start_idx = np.random.choice(valid_starts)
+#     drop_mask[start_idx : start_idx + MASK_WINDOW] = True
+    
+#     return drop_mask
+
+# def apply_protocol_B_hidden_peak(drop_mask, day_df):
+#     """
+#     Protocol B: The 'Hidden Peak' Mask (Causal Regime).
+#     Target: Post-prandial peaks.
+#     Action: Mask 90-minute segments CENTERED on the peak following a meal.
+#     """
+#     cgm_values = day_df['cgm'].values
+#     meal_indices = np.where(day_df['meal'] > 0)[0]
+    
+#     if len(meal_indices) == 0:
+#         return drop_mask
+
+#     meal_idx = np.random.choice(meal_indices)    
+#     look_ahead = 24 
+#     search_end = min(meal_idx + look_ahead, len(day_df))
+    
+#     if search_end <= meal_idx:
+#         return drop_mask
+        
+#     local_window = cgm_values[meal_idx : search_end]
+#     peak_offset = np.argmax(local_window)
+#     peak_idx = meal_idx + peak_offset
+
+
+#     MASK_WINDOW = 40
+    
+#     half_window = MASK_WINDOW // 2
+#     start_idx = max(0, peak_idx - half_window)
+#     end_idx = min(len(day_df), peak_idx + half_window)
+    
+#     if not drop_mask[start_idx:end_idx].any():
+#         drop_mask[start_idx:end_idx] = True
+        
+#     return drop_mask
+
+# def apply_protocol_C_hidden_rescue(drop_mask, day_df):
+#     """
+#     Protocol C: The 'Hidden Rescue' Mask (Hypo Detection).
+#     Target: Nadir of hypoglycemic event (<70 mg/dL).
+#     Action: Mask the drop/nadir to test if model infers rescue from suspension.
+#     """
+#     cgm_values = day_df['cgm'].values
+    
+#     hypo_indices = np.where(cgm_values < 70)[0]
+    
+#     if len(hypo_indices) == 0:
+#         return drop_mask
+        
+#     nadir_idx = hypo_indices[np.argmin(cgm_values[hypo_indices])]
+    
+#     half_window = MASK_WINDOW // 2
+#     start_idx = max(0, nadir_idx - half_window)
+#     end_idx = min(len(day_df), nadir_idx + half_window)
+    
+#     drop_mask[start_idx:end_idx] = True
+    
+#     return drop_mask
+
+# def process_single_day_experiment(day_df, experiment_mode='A'):
+#     """
+#     Master function to apply specific experimental protocols.
+#     mode: 'A' (Homeostatic), 'B' (Hidden Peak), 'C' (Hidden Rescue), or 'Mixed'
+#     """
+#     df_day = day_df.copy()
+#     total_points = len(df_day)
+#     drop_mask = np.zeros(total_points, dtype=bool)
+    
+#     if experiment_mode == 'A':
+#         drop_mask = apply_protocol_A_homeostatic(drop_mask, df_day)
+#     elif experiment_mode == 'B':
+#         drop_mask = apply_protocol_B_hidden_peak(drop_mask, df_day)
+#     elif experiment_mode == 'C':
+#         drop_mask = apply_protocol_C_hidden_rescue(drop_mask, df_day)
+#     elif experiment_mode == 'Mixed':
+#         if np.random.rand() < 0.33:
+#             drop_mask = apply_protocol_C_hidden_rescue(drop_mask, df_day)
+#         if np.random.rand() < 0.5: # Conditional on previous
+#              drop_mask = apply_protocol_B_hidden_peak(drop_mask, df_day)
+#         else:
+#              drop_mask = apply_protocol_A_homeostatic(drop_mask, df_day)
+
+#     # Apply NaNs
+#     col_loc = df_day.columns.get_loc('cgm_simulated')
+#     df_day.iloc[drop_mask, col_loc] = np.nan
+    
+#     return df_day
+
+# def simulate_experiment_pipeline(df, mode='Mixed'):
+#     df = df.copy()
+#     if 'cgm_simulated' not in df.columns:
+#         df['cgm_simulated'] = df['cgm'].copy()
+#     return process_single_day_experiment(df, experiment_mode=mode)
+

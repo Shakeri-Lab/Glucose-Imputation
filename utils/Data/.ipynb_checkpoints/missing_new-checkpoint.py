@@ -45,7 +45,7 @@ def apply_protocol_B_hidden_peak(drop_mask, day_df, missing_config, POINTS_PER_H
     """
     T, cgm_values = len(day_df), day_df['cgm'].values
     
-    MIN_WINDOW_LEN, MAX_WINDOW_LEN = int(2.5 * POINTS_PER_HOUR), int(3.0 * POINTS_PER_HOUR) 
+    MIN_WINDOW_LEN, MAX_WINDOW_LEN = int(2.5 * POINTS_PER_HOUR), int(4.0 * POINTS_PER_HOUR) 
     min_total_points, max_total_points = int(T * missing_config['min']), int(T * missing_config['max'])
     target_total_points = np.random.randint(min_total_points, max_total_points + 1)
 
@@ -88,15 +88,9 @@ def process_single_day_experiment(day_df, experiment_mode='A'):
     elif experiment_mode == 'B':
         drop_mask = apply_protocol_B_hidden_peak(drop_mask, df_day, config_B)
     elif experiment_mode == 'Mixed':
-        choice_prob = np.random.rand()
-        if choice_prob < 0.2:
-            drop_mask = apply_protocol_A_homeostatic(drop_mask, df_day, config_A)
-        elif choice_prob < 0.5:
-            drop_mask = apply_protocol_B_hidden_peak(drop_mask, df_day, config_B)
-        else:
-            drop_mask = apply_protocol_A_homeostatic(drop_mask, df_day, config_A)
-            drop_mask = apply_protocol_B_hidden_peak(drop_mask, df_day, config_B)
-            
+        drop_mask = apply_protocol_A_homeostatic(drop_mask, df_day, config_A)
+        drop_mask = apply_protocol_B_hidden_peak(drop_mask, df_day, config_B)
+
     if 'cgm_simulated' in df_day.columns:
         col_loc = df_day.columns.get_loc('cgm_simulated')
         df_day.iloc[drop_mask, col_loc] = np.nan

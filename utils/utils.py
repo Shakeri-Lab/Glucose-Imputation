@@ -3,6 +3,7 @@ import torch.nn as nn
 import os, torch, argparse, logging, random, yaml, argparse, json
 from .Data.cgm_dataset import CGMDataset
 import matplotlib.pyplot as plt
+from tslearn.metrics import dtw
 
 def parse_args_from_yml(config_path):
     """ Read .yml file. """
@@ -25,27 +26,6 @@ def set_seed(seed=42):
     os.environ["PYTHONHASHSEED"] = str(seed)
 
 
-# def load_data(args):
-#     """ Load dataset. """
-#     logging.info(f"Loading dataset from {args.data_path}")
-#     all_dataset_dict = {'org': None, 'missed': None}
-    
-#     for keys in all_dataset_dict.keys():       
-#         data_dict = {}
-#         for splt in ['train', 'val', 'test']:
-#             sub_dataset = CGMDataset(data_path=os.path.join(args.data_path, splt + '.csv'), seq_len=args.seq_len, stride=args.stride, missing_enabled=True, miss_cfg=args.miss_config, is_dclp3=args.is_dclp3)
-            
-#             signal = sub_dataset[:, :, 0] if keys == 'missed' else sub_dataset[:, :, -1]                
-#             print(sub_dataset[:, :, 0].shape)
-#             signal, meal, time_embed = signal.unsqueeze(-1), sub_dataset[:, :, 1].unsqueeze(-1), sub_dataset[:, :, 2:4] 
-            
-#             sub_dataset = torch.cat([signal, meal, time_embed], dim=2)
-#             data_dict[splt] = sub_dataset
-
-#         all_dataset_dict[keys] = data_dict
-
-#     return all_dataset_dict
-
 
 
 def load_data(args):
@@ -53,7 +33,7 @@ def load_data(args):
     logging.info(f"Loading dataset from {args.data_path}")    
     all_dataset_dict = {'org': {}, 'missed': {}}    
     for splt in ['train', 'val', 'test']:
-        raw_dataset = CGMDataset(data_path=os.path.join(args.data_path, splt + '.csv'), seq_len=args.seq_len, stride=args.stride, missing_enabled=True, miss_cfg=args.miss_config, is_dclp3=args.is_dclp3)
+        raw_dataset = CGMDataset(data_path=os.path.join(args.data_path, splt + '.csv'), seq_len=args.seq_len, stride=args.stride, missing_enabled=True, miss_cfg=args.miss_config, is_pedap=args.is_pedap)
         
         meal = raw_dataset[:, :, 1].unsqueeze(-1)
         time_embed = raw_dataset[:, :, 2:4]
@@ -69,11 +49,6 @@ def load_data(args):
             all_dataset_dict[key][splt] = processed_data
 
     return all_dataset_dict
-
-
-
-
-
 
 
 def skew_norm(x, skew, min_val, max_val):
@@ -118,21 +93,62 @@ def visualize_imputation(truth, truth_org, imp, mask, s_idx=0, f_idx=0, title="I
         plt.close()
 
 
-def eval_metrics(tr_ts, pre_ts):
-    """ Eval metrics. """
-    err = pre_ts - tr_ts
+
+def eval_metrics(tr_ts, pre_ts, mask):
+    """
+    Evaluates imputation performance using both statistical error metrics 
+    and clinical metrics defined in the paper.
+    """
+    mask_bool = mask.astype(bool)
+    y_true_flat = tr_ts[mask_bool]
+    y_pred_flat = pre_ts[mask_bool]
+
+    if len(y_true_flat) == 0:
+        return {k: 0.0 for k in ["MSE", "MAE", "RMSE", "Bias", "emp_SE", "mard", "PCR", "hypo_sens"]}
+
+    err = y_pred_flat - y_true_flat
+    
     mse = np.mean(err ** 2)
     mae = np.mean(np.abs(err))
     rmse = np.sqrt(mse)
     bias = np.mean(err)
-    emp_SE = np.std(err, ddof=1)  # empirical standard error (sample std)
-    mard = np.mean(np.abs((pre_ts - tr_ts) / tr_ts)) * 100
+    emp_SE = np.std(err, ddof=1) # Empirical Standard Error
+    
+    mard = np.mean(np.abs(err / (y_true_flat + 1e-6))) * 100
+
+    dtw_score = calc_dtw(tr_ts, pre_ts, mask)
     return {
         "MSE": float(mse),
         "MAE": float(mae),
         "RMSE": float(rmse),
         "Bias": float(bias),
         "emp_SE": float(emp_SE),
-        "mard": float(mard)
+        "mard": float(mard),
+        'dtw': float(dtw_score),
     }
-    
+
+def calc_dtw(ground_truth, imputation, mask):
+    """ DTW to measure shape. """
+    distances = []
+    for i, (gr_ts, pr_ts) in enumerate(zip(ground_truth, imputation)):
+        flag_tuples = tuple_flags(mask[i])
+        for tpl in flag_tuples:
+            gr_slice = gr_ts[tpl[0]:tpl[1] + 1]
+            pr_slice = pr_ts[tpl[0]:tpl[1] + 1]
+            distances.append(dtw(gr_slice, pr_slice))
+    return np.mean(np.array(distances))
+
+def tuple_flags(flgs):
+    """Give list of contiguous True-index intervals."""
+    indices = np.where(flgs)[0]
+    if len(indices) == 0: return []
+
+    indices_tuples = []
+    strt = indices[0]
+    for i in range(len(indices) - 1):
+        if indices[i + 1] - indices[i] > 1:
+            indices_tuples.append([strt, indices[i]])
+            strt = indices[i + 1]
+
+    indices_tuples.append([strt, indices[-1]])
+    return indices_tuples

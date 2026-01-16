@@ -2,21 +2,26 @@ import torch, math
 import numpy as np
 import pandas as pd
 from torch.utils.data import Dataset
-from .missing import simulate_missingness_pipeline
+# from .missing import simulate_missingness_pipeline
+from .missing import simulate_experiment_pipeline
 
 class CGMDataset(Dataset):
     def __init__(self, data_path, seq_len=288, stride=12, 
-                 missing_enabled=True, miss_cfg=None, is_dclp3=False):
+                 missing_enabled=True, miss_cfg=None, is_pedap=False):
         self.seq_len = seq_len
         self.stride = stride
         self.missing_enabled = missing_enabled
         self.miss_cfg = miss_cfg or {}
         
         self.df = pd.read_csv(data_path)
+
+        if is_pedap:
+            self.df = self.df.loc[:, ~self.df.columns.duplicated()]
+            self.df['date'] = pd.to_datetime(self.df['date'], format='%Y-%m-%d %H:%M:%S')
         
         if not self.missing_enabled: self.df['cgm_simulated'] = self.df['cgm'].copy() 
 
-        self.samples = self._build_samples_dclp3() if is_dclp3 else self._build_samples()
+        self.samples = self._build_samples_dclp3() if is_pedap else self._build_samples()
 
     def _absolute_time_encoding(self, indices, T_day=288):
         t = indices.float() / float(T_day)
@@ -46,10 +51,9 @@ class CGMDataset(Dataset):
         for i in range(0, num_points - self.seq_len + 1, self.stride):
 
             if self.missing_enabled:
-                slice_df = simulate_missingness_pipeline(
+                slice_df = simulate_experiment_pipeline(
                     group.iloc[i : i + self.seq_len],
-                    max_pct=self.miss_cfg.get('max_pct', 0.3),
-                    probs=self.miss_cfg.get('probs', {'mnar': 0.5, 'meal': 0.3, 'mcar': 0.8}),
+                    self.miss_cfg
                 )
             else:
                 slice_df = group.iloc[i : i + self.seq_len]
