@@ -4,7 +4,7 @@ from hyperparameter_optuna import HyperParameter
 from pypots.utils.random import set_random_seed
 from train import engine
 import os 
-# python hyperparameter_engine.py --model_name SAITS --ParamRangeDir param_range.json --config-path config.yml --NTrials 3
+# python hyperparameter_engine.py --model_name SAITS --ParamRangeDir param_range.json --config-path config.yml --NTrials 3 --is_evaluate
 def parse_args():
     """
     read config file and extract args.
@@ -28,7 +28,7 @@ def parse_args():
 
     test_param_dir = os.path.join(config.saving_path, config.model, 'best_hyperparameter.json') if train_best or is_evaluate else None
     
-    return parse_args_from_json(test_param_dir if train_best or is_evaluate else parsed_vars.ParamRangeDir, parsed_vars.model_name, train_best, is_evaluate), config, parsed_vars.NTrials, train_best, is_evaluate
+    return parse_args_from_json(test_param_dir if (train_best or is_evaluate) and (config.model not in ['Lerp', 'Mean', 'Median', 'LOCF']) else parsed_vars.ParamRangeDir, parsed_vars.model_name, train_best, is_evaluate), config, parsed_vars.NTrials, train_best, is_evaluate
 
 def parse_args_from_json(ParamRangeDir, model_name, train_best, is_evaluate):    
     """ Read json file. """
@@ -41,8 +41,8 @@ def parse_args_from_json(ParamRangeDir, model_name, train_best, is_evaluate):
     return argparse.Namespace(**config_dict)
 
 if __name__ == '__main__':
-    # set_random_seed(7)
-    # set_seed(seed=7)
+    set_random_seed(7)
+    set_seed(seed=7)
     args, config, n_trials, train_best, is_evaluate = parse_args()
     store_best_dir = os.path.join(config.saving_path, config.model)
     if train_best or is_evaluate:

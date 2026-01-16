@@ -5,17 +5,22 @@
 #SBATCH --cpus-per-task=10
 #SBATCH --gres=gpu:1
 #SBATCH --mem=100000
-#SBATCH --time=72:00:00
+#SBATCH --time=4:00:00
 #SBATCH --partition=gpu
 #SBATCH -A shakeri-lab
-#SBATCH --array=0-9
+#SBATCH --array=0-13
 #SBATCH --output=logs/train-out_%A_%a.log
 #SBATCH --error=logs/train-err_%A_%a.log
 
-# MODEL_NAMES=("TimeMixer" "TimeMixerPP" "ModernTCN" "TSLANet" "TEFN" "TOTEM" "GPT4TS")
-MODEL_NAMES=("SAITS" "FreTS" "CSDI" "SCINet" "TimeMixer" "TimeMixerPP" "TSLANet" "TEFN" "TOTEM" "GPT4TS")
-# MODEL_NAMES=("SAITS" "FreTS" "SCINet" "TimeMixer" "TSLANet" "TEFN" "TOTEM" "GPT4TS")
-# MODEL_NAMES=("SAITS")
+
+
+# MODEL_NAMES=("CSDI" "TimeMixerPP")
+
+# MODEL_NAMES=("SAITS" "FreTS" "CSDI" "SCINet" "TimeMixer" "TimeMixerPP" "TSLANet" "TEFN" "TOTEM" "GPT4TS")
+MODEL_NAMES=("SAITS" "FreTS" "CSDI" "SCINet" "TimeMixer" "TimeMixerPP" "TSLANet" "TEFN" "TOTEM" "GPT4TS" "Lerp" "LOCF" "Median" "Mean")
+# MODEL_NAMES=("Lerp" "LOCF" "Median" "Mean")
+# MODEL_NAMES=("TimeMixerPP")
+
 
 PARAM_RANGE_FILE="param_range.json"
 CONFIG_FILE="config.yml"
@@ -37,8 +42,7 @@ python hyperparameter_engine.py \
     --ParamRangeDir "$PARAM_RANGE_FILE" \
     --config-path "$CONFIG_FILE" \
     --NTrials $NUM_TRIALS \
-
-
+    --is_evaluate
 # --train_best
 # --is_evaluate
 

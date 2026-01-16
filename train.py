@@ -126,13 +126,10 @@ def seg_evaluate(args, test_set_imputation, noNan_test_set, test_indicating_mask
     mask = test_indicating_mask.astype(bool)
     tr_ts = noNan_test_set[mask]
     pr_ts = test_set_imputation[mask]
-    
-    probs = args.miss_config['probs']
 
-    result_name = f"max{args.miss_config['max_pct']}_mnar{probs['mnar']}_meal{probs['meal']}_mcar{probs['mcar']}"
-    
+    result_name = args.miss_config
     with open(os.path.join(save_dir, f'{result_name}_metrics.json'), 'w') as f:
-        json.dump(eval_metrics(tr_ts, pr_ts), f, indent=4)
+        json.dump(eval_metrics(noNan_test_set, test_set_imputation, mask), f, indent=4)
 
     risk_calc(tr_ts, pr_ts, os.path.join(save_dir, result_name), args.seg_path)
 
@@ -184,8 +181,6 @@ def engine(args, suggest_hp):
         print(f"Error in engine execution: {e}")
         return float('inf'), None
 
-
-  
 
 # if __name__ == "__main__":
 #     args = parse_args()
