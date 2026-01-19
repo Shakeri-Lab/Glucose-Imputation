@@ -4,6 +4,7 @@ import pandas as pd
 from torch.utils.data import Dataset
 # from .missing import simulate_missingness_pipeline
 from .missing import simulate_experiment_pipeline
+from .train_missing import init_train_masking
 
 class CGMDataset(Dataset):
     def __init__(self, data_path, seq_len=288, stride=12, 
@@ -18,7 +19,9 @@ class CGMDataset(Dataset):
         if is_pedap:
             self.df = self.df.loc[:, ~self.df.columns.duplicated()]
             self.df['date'] = pd.to_datetime(self.df['date'], format='%Y-%m-%d %H:%M:%S')
-        
+            
+        if self.miss_cfg['is_real_mask']: self.real_mask_gen = init_train_masking(miss_cfg['csv_list'], miss_cfg['valid_threshold'])
+            
         if not self.missing_enabled: self.df['cgm_simulated'] = self.df['cgm'].copy() 
 
         self.samples = self._build_samples_dclp3() if is_pedap else self._build_samples()
@@ -51,10 +54,10 @@ class CGMDataset(Dataset):
         for i in range(0, num_points - self.seq_len + 1, self.stride):
 
             if self.missing_enabled:
-                slice_df = simulate_experiment_pipeline(
-                    group.iloc[i : i + self.seq_len],
-                    self.miss_cfg
-                )
+                if self.miss_cfg['is_real_mask']: 
+                    slice_df = self.real_mask_gen.generate_mask(group.iloc[i : i + self.seq_len])
+                else:
+                    slice_df = simulate_experiment_pipeline(group.iloc[i : i + self.seq_len], self.miss_cfg['type'])
             else:
                 slice_df = group.iloc[i : i + self.seq_len]
 
