@@ -1,134 +1,199 @@
-Algorithmic Specification: Realistic Missingness Generator
+# 🧠 Algorithmic Methodology: Realistic Missingness as a Generative Process
 
-1. Introduction
+## 🎯 Motivation
 
-This approach models missingness as a Structured Stochastic Process with two distinct dependencies:
+Missing data in real-world time-series is **not random**. It follows repeatable patterns driven by physiology, behavior, and hardware constraints. Treating missingness as MCAR hides this structure and produces misleading evaluations.
 
-Temporal Dependency (Circadian Rhythm): The probability of a gap occurring is non-stationary; it varies significantly by time of day (e.g., compression artifacts during sleep vs. signal loss during commutes).
+This methodology models missingness as a **learnable stochastic process** and then **re-samples it algorithmically**.
 
-Duration Dependency (Heavy-Tailed Distribution): The length of a gap follows a complex, multi-modal distribution. Most gaps are short (single packet loss), but some are systematic (restarts) or long-term (sensor failure).
+> 🧩 Goal: generate missingness that behaves like reality, not like noise.
 
-The system operates in two distinct phases: Parameter Estimation (Learning) and Stochastic Synthesis (Generating).
+---
 
-2. Phase I: Statistical Parameter Estimation
+## 🧱 Core Decomposition
 
-The objective of this phase is to derive a probabilistic model $P(Gap | t, \text{history})$ from historical raw data.
+Missingness is represented as a sequence of **gap events**. Each gap is defined by three independent components:
 
-A. Temporal Grid Standardization
+1. ⏰ **When** the gap starts
+2. 🧬 **What type** of gap it is (atomic vs sustained)
+3. 📏 **How long** it lasts
 
-Before statistical analysis, irregular sensor streams must be mapped to a rigorous discrete time domain.
+Formally:
 
-Algorithm: The timeline is discretized into fixed bins (e.g., $\Delta t = 5$ mins) aligned to absolute timestamps (00:00, 00:05, ...).
+P(missingness) = P(start time) · P(gap type) · P(duration | type)
 
-Mechanism: A "Left-Join" operation is performed against a theoretical complete time grid.
+This separation keeps the model interpretable and modular.
 
-Logic: Any bin in the theoretical grid without a matching valid sensor reading is flagged as a "Gap". This conversion is crucial because it transforms "implicit" missingness (the absence of a database row) into "explicit" missingness (the presence of a NaN state), enabling the calculation of gap durations.
+---
 
-B. Signal-to-Noise Filtering ("Ghost Days")
+## 🧠 Modeling Assumptions
 
-A critical preprocessing step separates behavioral artifacts (user non-compliance) from technical artifacts (sensor failure).
+To remain simple and stable, the model assumes:
 
-Concept: A "Ghost Day" is defined as a 24-hour period where the user barely wore the device (e.g., they took it off for 20 hours). If included in the analysis, these days would introduce massive gaps (1000+ minutes) that are not representative of sensor performance.
+* ⌚ Fixed temporal grid (Δt = 5 minutes)
+* 🔗 Missingness appears as contiguous gaps
+* 🧩 Timing and duration are conditionally independent
+* 👥 Population-level statistics are shared
 
-Algorithm: We calculate the Data Density ($D$) for each 24-hour window.
+These assumptions are explicit and can be relaxed later.
 
-$$D = \frac{\text{Observed Points}}{\text{Maximum Theoretical Points}}$$
+---
 
-Thresholding: If $D < \text{Threshold}$ (e.g., 0.5), the entire 24-hour window is excluded from the learning set. This ensures the derived distribution represents the conditional probability of failure given that the device is being worn.
+## 🔬 Stage I — Learning Missingness from Data
 
-C. Hybrid Distribution Modeling
+### 🧭 Step 1: Temporal Alignment
 
-The core innovation is the modeling of gap durations. Empirical analysis reveals that gap durations follow a Bi-Modal, Heavy-Tailed Distribution that cannot be fitted by standard Gaussian or Exponential curves alone. The algorithm employs a Two-Stage Hybrid Model:
+All signals are projected onto a complete, fixed-resolution timeline. After this step, missingness is a **binary process** over time rather than an artifact of irregular sampling.
 
-Stage 1: The Discrete "Micro-Gap" Event (Point Mass)
+---
 
-The most frequent error in digital transmission is a single missed packet (e.g., one 5-minute void). This behaves as a discrete event rather than part of a continuous curve.
+### 🧹 Step 2: Structural Day Validation
 
-$$P_{micro} = \frac{N_{single}}{N_{total}}$$
+Days with extremely low data coverage are removed. These days usually represent non-wear or logging failure rather than genuine sensor gaps.
 
-Interpretation: This separates the "glitches" from the "outages."
+✔ Only days exceeding a minimum coverage threshold are retained.
 
-Stage 2: The "Macro-Gap" Mixture Model (Continuous Tail)
+---
 
-For gaps longer than a single packet ($t > 5$), the probability density function (PDF) is approximated using a Gaussian-Exponential Mixture Model with a noise floor. This composite function $f(t)$ captures three distinct physical failure modes:
+### 🧾 Step 3: Gap Event Representation
 
-$$f(t) = \underbrace{A e^{-kt}}_{\text{Random Drops}} + \underbrace{B e^{-\frac{(t-\mu)^2}{2\sigma^2}}}_{\text{Systemic Reboots}} + \underbrace{C}_{\text{Outliers}}$$
+Missingness is summarized as a set of gap events:
 
-Memoryless Failures (Exponential Component):
+G = {(t₁, ℓ₁), (t₂, ℓ₂), …}
 
-Physics: Random, independent connection drops (e.g., Bluetooth interference, distance from receiver). These follow a Poisson process, resulting in exponentially decaying durations.
+where:
 
-Dominance: Short to medium gaps (10–45 mins).
+* tᵢ = gap start time
+* ℓᵢ = gap duration
 
-Systemic Failures (Gaussian Component):
+This converts raw binary sequences into a **marked point process**.
 
-Physics: Predictable duration events. For example, a sensor warm-up cycle or a firmware crash-and-reboot sequence often takes a fixed amount of time (e.g., exactly 2 hours). This creates a "hump" in the distribution centered around mean $\mu$.
+---
 
-Dominance: Medium to long gaps (~120 mins).
+### ⏰ Step 4: Learning *When* Gaps Start
 
-Background Noise (Uniform Component):
+We estimate the probability that a gap begins at each hour of the day:
 
-Physics: Random, long-tail outliers (e.g., sensor peeling off, battery death). This ensures the model can generate rare, very long gaps.
+P(start | hour = h)
 
-Optimization: The parameters $(A, k, B, \mu, \sigma, C)$ are optimized using Non-linear Least Squares (Levenberg-Marquardt algorithm) to minimize the residual between the mixture equation and the empirical histogram of observed macro-gaps.
+This captures circadian structure such as nighttime compression losses or daytime activity artifacts.
 
-3. Phase II: Stochastic Mask Synthesis
+📊 No parametric assumptions—only empirical counting.
 
-The generator uses the learned parameters to synthesize new boolean masks via a Monte Carlo simulation.
+---
 
-A. Non-Homogeneous Poisson Process (The "When")
+### 📏 Step 5: Learning *How Long* Gaps Last
 
-Instead of initiating gaps uniformly (a Homogeneous Poisson Process), the algorithm creates a Non-Homogeneous process where the arrival rate $\lambda(t)$ depends on the time of day.
+Empirically, gap durations fall into two regimes.
 
-Input: An hourly probability vector $H = [p_0, p_1, ..., p_{23}]$, derived from the frequency of gap starts in the training data.
+#### ⚡ Atomic Gaps
 
-Process:
+Single-interval gaps (ℓ = Δt) are modeled explicitly using a Bernoulli probability.
 
-Iterate through every hour $h$ in the target timeframe.
+These represent brief transmission glitches.
 
-Perform a Bernoulli trial with probability $p_h$.
+#### 🧩 Sustained Gaps
 
-Offset Injection: If successful, a random minute offset $m \in [0, 59]$ is selected uniformly. The gap start time becomes $T_{start} = \text{Hour}_h + m$.
+Longer gaps are modeled using a mixture distribution:
 
-B. Hierarchical Duration Sampling (The "How Long")
+f(ℓ) = w₁·Exp(ℓ) + w₂·Gauss(ℓ) + w₃·Uniform(ℓ)
 
-Once a start time $T_{start}$ is established, the duration $\tau$ is determined via a hierarchical sampling tree:
+Interpretation:
 
-Micro vs. Macro Decision:
+* Exp → short outages
+* Gauss → structured physiological gaps
+* Uniform → rare long-tail events
 
-Draw random number $r_1 \sim U(0,1)$.
+---
 
-If $r_1 < P_{micro}$, then $\tau = 5 \text{ mins}$.
+## 🧪 Stage II — Generating New Missingness
 
-Mixture Component Selection (If Macro):
+### 🎯 Step 6: Gap Triggering
 
-To sample from the complex PDF $f(t)$, we first calculate the Area Under the Curve (AUC) (or "Probability Mass") for each component:
+For each hour in the target signal:
 
-Weight Exponential ($w_e$) $\approx \int A e^{-kt} dt$
+* Draw a Bernoulli trial using P(start | hour)
+* If successful, initiate a gap
 
-Weight Gaussian ($w_g$) $\approx \int B \mathcal{N}(\mu, \sigma) dt$
+---
 
-Weight Uniform ($w_u$) $\approx \int C dt$
+### 🎲 Step 7: Duration Sampling
 
-Normalize weights so $\sum w = 1$.
+If a gap is triggered:
 
-Draw random number $r_2 \sim U(0,1)$ to select a component based on these weights.
+* With probability P(ℓ = Δt), generate an atomic gap
+* Otherwise, sample ℓ from the mixture distribution
 
-Final Value Generation:
+Durations are clipped to plausible bounds.
 
-If Exponential selected: Generate $\tau \sim \text{Exp}(1/k)$.
+---
 
-If Gaussian selected: Generate $\tau \sim \mathcal{N}(\mu, \sigma)$.
+### 🧩 Step 8: Mask Realization
 
-If Uniform selected: Generate $\tau \sim U(10, 240)$.
+Each sampled gap is instantiated as a contiguous missing segment on the temporal grid. The output is a binary missingness mask.
 
-C. Vectorized Projection & Collision Handling
+---
 
-The abstract tuples $(T_{start}, \tau)$ are mapped onto the boolean mask array.
+## 🧠 Algorithm Summary (Pseudocode)
 
-Vectorization: The start time and duration are converted into array indices $[i_{start}, i_{end}]$.
+```
+Algorithm LearnAndGenerateMissingness
+Input: Time-series dataset D
+Output: Missingness mask M
 
-Collision Handling (Boolean OR):
-The algorithm initializes a False array. For each generated gap, it sets the slice mask[start:end] = True.
+1. Align all signals to fixed grid
+2. Remove low-coverage days
+3. Extract gap events G = {(tᵢ, ℓᵢ)}
+4. Estimate P(start | hour)
+5. Estimate P(ℓ = Δt)
+6. Fit mixture model for ℓ > Δt
 
-Significance: If a new gap is generated while a previous gap is still active (an overlapping collision), the Boolean OR operation naturally merges them. This mimics real-world scenarios where multiple failure causes (e.g., interference followed by a reboot) can overlap, resulting in a single longer observed gap.
+7. For each hour h in new signal:
+      if Bernoulli(P(start | h)):
+          if Bernoulli(P(ℓ = Δt)):
+              ℓ ← Δt
+          else:
+              ℓ ← Sample from mixture
+          Apply gap of length ℓ
+
+Return M
+```
+
+---
+
+## 🧭 Conceptual Diagram
+
+```
+Raw Signal
+   │
+   ▼
+[ Temporal Alignment ]
+   │
+   ▼
+[ Gap Extraction ]
+   │
+   ▼
+[ Learn Start-Time PMF ]
+[ Learn Duration Model ]
+   │
+   ▼
+[ Gap Trigger + Duration Sampler ]
+   │
+   ▼
+Generated Missingness Mask
+```
+
+---
+
+## 🌱 Why This Design Works
+
+* 🧩 Clear separation of concerns
+* 📊 Fully data-driven
+* 🔍 Interpretable at every stage
+* 🧪 Produces deployment-relevant missingness
+
+---
+
+## 🧠 Guiding Principle
+
+Missingness is **behavior**, not noise. Modeling it explicitly leads to fairer benchmarks and more robust algorithms.
