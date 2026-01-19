@@ -198,7 +198,3 @@ Generated Missingness Mask
 * 🧪 Produces deployment-relevant missingness
 
 ---
-
-## 🧠 Guiding Principle
-
-Missingness is **behavior**, not noise. Modeling it explicitly leads to fairer benchmarks and more robust algorithms.
