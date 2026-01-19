@@ -106,6 +106,11 @@ Interpretation:
 
 ---
 
+gap distribution modeling is shown below: 
+![Alt text for screen readers]( real_mask_distribution.png)
+
+
+
 ## 🧪 Stage II — Generating New Missingness
 
 ### 🎯 Step 6: Gap Triggering
