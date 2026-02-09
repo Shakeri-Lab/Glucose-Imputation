@@ -1,29 +1,48 @@
 model: Lerp
-
-# saving_path: ./FinalExp/mar_30/simulate/
-# saving_path: ./ModeExp/simulate/A/
-saving_path: ./ModeExp/simulate/Mixed/
+saving_path: ./New_DAY_NIGHT/simulate/Mixed/
 is_pedap: False
-
+missing_enabled: True
 device: cuda
 impute_all_sets: True
-miss_config: 'B'
 
+miss_config:
+    type: 'C'
+    is_real_mask: False
+    csv_list: ['RawData/dclp3_cgm_plus_features.csv', 'RawData/dclp5_cgm_plus_features.csv']
+    valid_threshold: 0.5
+    protocol_mask_ratio: 0.3
+    num_meal_hide: 3
+    peak_prominence_mgdl: 40
+    peak_distance_minutes: 120
 # is_evaluate: True
 # train_best: False
 
 # Data
 max_day_length: 288
 seq_len: 288
-stride: 57
+stride: 128
 batch_size: 32
 
 # Hyperparameter tuning
-n_trials: 50
+n_trials: 40
 
-# data_path: '/project/shakeri-lab/Alireza_timeseries/benchmark/datasets_processed/DCLP3/splits/dclp3_patients_70_10_20_seed42/'
-data_path: '/project/shakeri-lab/Amir/Data_Processing/Sim/sim/UVA-T1D-Simulator/TestAID/ImputationModerateConfig/'
+# data_path: '/project/shakeri-lab/Amir/Data_Processing/Sim/sim/UVA-T1D-Simulator/TestAID/ImputationModerateConfig/'
+
+# data_path: '/project/shakeri-lab/Amir/Data_Processing/Sim/sim/UVA-T1D-Simulator/TestAID/NewImputationModerateConfig'
+
+
+
+
+
+
 # data_path: '/project/shakeri-lab/Alireza_timeseries/benchmark/datasets_processed/PEDAP/splits/pedap_patients_70_10_20_seed42/'
 
+
+
+
+
+
+# data_path: '/project/shakeri-lab/Amir/CGM_Imputation/PEDAP/raw_data/'
+data_path: '/project/shakeri-lab/Amir/CGM_Imputation/tcr_data/'
 seg_path: utils/risk_matrix_seg.npy
 plot_dir: './'
