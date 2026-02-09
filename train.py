@@ -127,7 +127,10 @@ def seg_evaluate(args, test_set_imputation, noNan_test_set, test_indicating_mask
     tr_ts = noNan_test_set[mask]
     pr_ts = test_set_imputation[mask]
 
-    result_name = args.miss_config
+    result_name = args.miss_config['type'] + '_' + str(args.miss_config['protocol_mask_ratio'] if args.miss_config['type'] == 'A' 
+                                                       else args.miss_config['num_meal_hide'] if args.miss_config['type'] == 'B'
+                                                       else '')    
+    np.save(os.path.join(save_dir, result_name + '_result_prediction.npy'), np.stack([noNan_test_set, test_set_imputation, mask], axis=-1))
     with open(os.path.join(save_dir, f'{result_name}_metrics.json'), 'w') as f:
         json.dump(eval_metrics(noNan_test_set, test_set_imputation, mask), f, indent=4)
 
@@ -150,7 +153,10 @@ def test_calc(args, dataset_dict, test_set_imputation):
     mae, mse, mre = test_evaluate(test_set_imputation, noNan_test_set, test_indicating_mask)         
     logger.info(f"Result: MAE: {mae}, MSE: {mse}, MRE: {mre}")
 
-    visualize_imputation(unskew_norm(corrupted_data, 1, 40, 400), unskew_norm(ground_truth_data, 1, 40, 400), test_set_imputation, test_indicating_mask, s_idx=0, f_idx=0, title="Imp_Quality", plot_dir=args.plot_dir)
+    result_dir = os.path.join(args.plot_dir, args.miss_config['type'] + '_' + str(args.miss_config['protocol_mask_ratio'] if args.miss_config['type'] == 'A'
+                                                                                  else args.miss_config['num_meal_hide'] if args.miss_config['type'] == 'B' 
+                                                                                  else '') + '_plots')
+    visualize_imputation(unskew_norm(corrupted_data, 1, 40, 400), unskew_norm(ground_truth_data, 1, 40, 400), test_set_imputation, test_indicating_mask, s_idx=0, f_idx=0, title="Imp_Quality", plot_dir=result_dir)
         
 
 def engine(args, suggest_hp):
