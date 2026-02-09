@@ -20,6 +20,11 @@ def parse_args():
     parsed_vars = parser.parse_args()
     train_best = parsed_vars.train_best
     is_evaluate = parsed_vars.is_evaluate
+
+
+    if is_evaluate:
+        set_random_seed(7)
+        set_seed(seed=7)
     
     config = parse_args_from_yml(parsed_vars.config_path)
     config.model = parsed_vars.model_name
@@ -41,8 +46,6 @@ def parse_args_from_json(ParamRangeDir, model_name, train_best, is_evaluate):
     return argparse.Namespace(**config_dict)
 
 if __name__ == '__main__':
-    set_random_seed(7)
-    set_seed(seed=7)
     args, config, n_trials, train_best, is_evaluate = parse_args()
     store_best_dir = os.path.join(config.saving_path, config.model)
     if train_best or is_evaluate:
