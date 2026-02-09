@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.stats import gamma
+from scipy.stats import truncnorm
 from scipy.optimize import curve_fit
 
 class MISSINGNESS_PATTERN:
@@ -36,10 +36,7 @@ class MISSINGNESS_PATTERN:
         return df_regular
 
     def filter_valid_days(self, df, threshold=0.50):
-        """
-        Removes 'Ghost Days' (low adherence) so they don't corrupt the gap analysis.
-        Standard requirement: >70% data (approx 200/288 points).
-        """
+        """ Removes 'Ghost Days' (low adherence) so they don't corrupt the gap analysis. """
         expected_points = 288
         min_required = expected_points * threshold
         
@@ -55,6 +52,7 @@ class MISSINGNESS_PATTERN:
         return df_filtered
 
     def analyze_gaps(self, rs_df):
+        """ Find missing block starting point with its length. """
         gap_data = []
         for sid, grp in rs_df.groupby('SID'):
             mask = grp[self.target_col].isna()
@@ -77,127 +75,181 @@ class MISSINGNESS_PATTERN:
         else:
             return pd.DataFrame()
 
-    def analyze_hourly_profile(self, gap_stats):
-        """
-        Calculates the 'When': Probability of a gap starting at Hour X.
-        """
-        counts = gap_stats['Hour_of_Day'].value_counts().sort_index()
-        probs = counts / counts.sum()
-        return probs.reindex(range(24), fill_value=0)
+    def analyze_hourly_profile(self, gap_stats, df_clean):
+        """ Probablity of hours gaps begin. """
+        M = df_clean[['SID', 'Date']].drop_duplicates().shape[0]
+        day_hour = gap_stats[['SID', 'Date', 'Hour_of_Day']].drop_duplicates()
+        Nh_days = day_hour['Hour_of_Day'].value_counts().sort_index()    
+        p = (Nh_days / M).reindex(range(24), fill_value=0)
+        return p.clip(upper=1.0)
 
-
-    def fit_global_distribution(self, gaps):
-        """
-        Fits the distribution in two parts:
-        1. Exact probability of 'Single Drops' (5 min).
-        2. Mixture Model (Exp + Gauss + Uniform Offset) for 'Real Gaps' (>5 min).
-        """
-        all_data = gaps['Duration_Min'].values
+    @staticmethod
+    def mixture_func(x, A, k, B, mu, sigma, C):
+        """ Curve formulation. """
+        exp_part = A * np.exp(-k * (x - 10))
+        gauss_part = B * np.exp(-((x - mu)**2) / (2 * sigma**2))
+        return exp_part + gauss_part + C
         
-        n_total = len(all_data)
-        n_single = np.sum(all_data <= 5)
-        prob_single = n_single / n_total if n_total > 0 else 0
-        tail_data = all_data[all_data > 5]
-        
-        if len(tail_data) == 0: return prob_single, None
+    def fit_regime_distribution(self, gaps, regime='day'):
+        """ Fits separate distributions for Day vs. Night. """
+        if regime == 'night':
+            subset = gaps[(gaps['Hour_of_Day'] >= 0) & (gaps['Hour_of_Day'] < 6)]
+        else:
+            subset = gaps[(gaps['Hour_of_Day'] >= 6)]
 
-        counts, bin_edges = np.histogram(tail_data, bins=47, density=True)
+        all_data = subset['Duration_Min'].values
+        valid = all_data[(all_data == 5) | ((all_data >= 10) & (all_data <= 240))]
+        if len(valid) == 0: return 0, None
+        prob_single = np.sum(valid == 5) / len(valid)
+        tail_data = valid[valid >= 10]
+        
+        if len(tail_data) < 10: return prob_single, None
+
+        counts, bin_edges = np.histogram(tail_data, bins=np.arange(10, 245, 5), density=True)
         bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-        
-        def mixture_func(x, A, k, B, mu, sigma, C):
-            exp_part = A * np.exp(-k * x)
-            gauss_part = B * np.exp(-((x - mu)**2) / (2 * sigma**2))
-            return exp_part + gauss_part + C
-
-        p0 = [np.max(counts), 0.05, np.max(counts)/10, 120, 20, 0.005]
-        
-        bounds = ([0, 0.001, 0, 60, 5, 0], [np.inf, 0.2, np.inf, 240, 60, 0.01])
-
-        try:
-            mix_params, _ = curve_fit(mixture_func, bin_centers, counts, 
-                                    p0=p0, bounds=bounds, maxfev=10000)
-            print("Tail Mixture Model (with Offset) Fitted Successfully.")
-        except RuntimeError:
-            print("Mixture fit failed.")
-            mix_params = None
-
+        mix_params = self._fit_curve(regime, np.max(counts), self.mixture_func, bin_centers, counts)
         return prob_single, mix_params
 
+    
+    def _fit_curve(self, regime, max_density, mixture_func, bin_centers, counts): 
+        """ Help function for fitting curve. """
+        if regime == 'day':
+            A_guess, k_guess = counts[0], 0.02
+            B_guess = counts[(np.abs(bin_centers - 120)).argmin()] * 3
+            p0 = [A_guess, k_guess, B_guess, 120, 1, 0.001]
+            bounds = ([0, 0.001, 0, 118, 1, 0], [np.inf, 0.2, B_guess, 122, 2, 0.01])
+        else:
+            p0 = [max_density, 0.05, max_density/10, 30, 10, 0.001]            
+            bounds = ([0, 0.001, 0, 10, 5, 0], [np.inf, 0.2, np.inf, 240, 60, 0.01])
+        try:
+            mix_params = curve_fit(mixture_func, bin_centers, counts, p0=p0, bounds=bounds, maxfev=10000)[0]
+            print(f"{regime.capitalize()} Fit Success: mu={mix_params[3]:.2f}, sigma={mix_params[4]:.2f}")
+        except (RuntimeError, ValueError):
+            print(f"{regime.capitalize()} fit failed.")
+            mix_params = None
+        return mix_params
 
 class RealisticMaskGenerator:
-    def __init__(self, hourly_rate, prob_single, mix_params):
+    def __init__(self, hourly_rate, day_params, night_params):
+        """
+        day_params / night_params: Tuple of (prob_single, mix_params)
+        """
         self.hourly_probs = hourly_rate.values if hasattr(hourly_rate, 'values') else hourly_rate
-        self.prob_single = prob_single
-        self.use_mixture = (mix_params is not None)
         
-        if self.use_mixture:
-            self.A, self.k, self.B, self.mu, self.sigma, self.C = mix_params
-            area_exp = (self.A / self.k) * np.exp(-self.k * 5)            
-            area_gauss = self.B * self.sigma * np.sqrt(2 * np.pi)            
-            area_unif = self.C * (240 - 5)
-            
-            total_area = area_exp + area_gauss + area_unif
-            
-            self.p_exp = area_exp / total_area
-            self.p_gauss = area_gauss / total_area
+        self.day_prob_single, self.day_mix = day_params
+        self.night_prob_single, self.night_mix = night_params
+        
+        self.day_areas = self._calc_areas(self.day_mix) if self.day_mix is not None else None
+        self.night_areas = self._calc_areas(self.night_mix) if self.night_mix is not None else None
 
-    def sample_duration(self):
-        """Decides 'How Long' using the Two-Stage logic."""
-        if np.random.rand() < self.prob_single: return 5.0
-        if self.use_mixture:
+    @staticmethod
+    def _truncnorm(mu, sigma, lo, hi):
+        a, b = (lo - mu) / sigma, (hi - mu) / sigma
+        return truncnorm.rvs(a, b, loc=mu, scale=sigma)
+    
+    @staticmethod
+    def _snap5(x, lo=10, hi=240):
+        x = float(x)
+        x = min(max(x, lo), hi)
+        return 5.0 * int(round(x / 5.0))
+    
+    def _calc_areas(self, params, lo=10, hi=240, step=5):
+        """ Integral of curve. """
+        A, k, B, mu, sigma, C = params
+        x = np.arange(lo, hi + step, step)
+    
+        exp_part = A * np.exp(-k * (x - lo))
+        gauss_part = B * np.exp(-((x - mu)**2) / (2 * sigma**2))
+        unif_part = C * np.ones_like(x)
+    
+        Z = (exp_part + gauss_part + unif_part).sum()
+        p_exp = exp_part.sum() / Z
+        p_gauss = gauss_part.sum() / Z
+    
+        return (p_exp, p_gauss, params, lo, hi)
+
+
+
+    def sample_duration(self, hour):
+        """ Decides duration based on Time of Day (Regime Switching). """
+        is_night = (hour < 6)
+        prob_single = self.night_prob_single if is_night else self.day_prob_single
+        mix_data = self.night_areas if is_night else self.day_areas
+        if np.random.rand() < prob_single: return 5.0        
+        if mix_data is not None:
+            p_exp, p_gauss, params, lo, hi = mix_data
+            A, k, B, mu, sigma, C = params
             r = np.random.rand()
-            if r < self.p_exp:
-                duration = np.random.exponential(scale=(1 / self.k)) + 5
-            elif r < (self.p_exp + self.p_gauss):
-                duration = np.random.normal(loc=self.mu, scale=self.sigma)                
+            if r < p_exp:
+                duration = 10 + np.random.exponential(scale=(1 / k))
+                duration = min(max(duration, lo), hi) 
+            elif r < (p_exp + p_gauss):
+                duration = self._truncnorm(mu, sigma, lo, hi)
             else:
-                duration = np.random.uniform(10, 240)
-            return max(10, min(duration, 1440))
+                duration = 5 * np.random.randint(lo//5, (hi//5) + 1)
+            
+            return self._snap5(float(duration), lo=lo, hi=hi)
+        
         return 10.0
 
-    def generate_mask(self, df_slice, points_per_hour=12):
-        """Creates a boolean mask (0=Missing, 1=Observed)."""  
-        df_slice = df_slice.copy()
-        if 'cgm_simulated' not in df_slice.columns: df_slice['cgm_simulated'] = df_slice['cgm'].copy()
-        dt_series = pd.to_datetime(df_slice['date'])
-        hour_list = dt_series.dt.hour.unique()
-        start_minute = dt_series.dt.minute.iloc[0]        
-        total_points = len(df_slice)
-        drop_mask = np.zeros(total_points, dtype=bool)
+    def _compute_mask_array(self, dt_series):
+        """ Returns a boolean NumPy array where True = Missing. """
+        total_points = len(dt_series)
+        drop_mask = np.zeros(total_points, dtype=bool)        
+        hours = dt_series.dt.hour.values 
         
-        for i, hour in enumerate(hour_list):
-            if np.random.rand() < self.hourly_probs[hour]:
-                duration_mins = self.sample_duration()
+        current_idx = 0
+        while current_idx < total_points:
+            current_hour = hours[current_idx]
+            hour_end_idx = current_idx
+            while hour_end_idx < total_points and hours[hour_end_idx] == current_hour: hour_end_idx += 1
+            if np.random.rand() < self.hourly_probs[current_hour]:                
+                duration_mins = self.sample_duration(current_hour)
                 duration_points = int(round(duration_mins / 5))
                 
                 if duration_points > 0:
-                    low_limit = int(start_minute / 5) if i == 0 else 0                    
-                    if low_limit >= points_per_hour: continue
-
-                    start_offset = np.random.randint(low_limit, points_per_hour)
-                    hour_indices = np.where(dt_series.dt.hour == hour)[0]
+                    points_in_hour = hour_end_idx - current_idx
+                    start_offset = np.random.randint(0, points_in_hour)
                     
-                    if len(hour_indices) > 0:
-                        base_idx = hour_indices[0]
-                        abs_start = base_idx + start_offset
-                        abs_end = min(abs_start + duration_points, total_points)
-    
-                        drop_mask[abs_start : abs_end] = True
+                    abs_start = current_idx + start_offset
+                    abs_end = min(abs_start + duration_points, total_points)                    
+                    drop_mask[abs_start : abs_end] = True
+                    current_idx = abs_end 
+                    continue 
 
-        if 'cgm_simulated' in df_slice.columns: df_slice.loc[drop_mask, 'cgm_simulated'] = np.nan  
+            current_idx = hour_end_idx
+            
+        return drop_mask
+
+    def generate_mask(self, df_slice):
+        """ Applies the calculated mask to the DataFrame. """  
+        df_slice = df_slice.copy()
+        if 'cgm_simulated' not in df_slice.columns: 
+            df_slice['cgm_simulated'] = df_slice['cgm'].copy()
+            
+        dt_series = pd.to_datetime(df_slice['date'])
+        if dt_series.empty: return df_slice
+        
+        drop_mask = self._compute_mask_array(dt_series)        
+        if 'cgm_simulated' in df_slice.columns: 
+            df_slice.loc[drop_mask, 'cgm_simulated'] = np.nan
+            
         return df_slice
 
 
 def init_train_masking(csv_list, threshold):
-    """ Init training real-world masking. """
+    """ Init training real-world masking with Day/Night splitting. """
     
     pipeline = MISSINGNESS_PATTERN(csv_list)
     df_resampled = pipeline.resampling()
     df_clean = pipeline.filter_valid_days(df_resampled, threshold=threshold)
     gaps = pipeline.analyze_gaps(df_clean)
-    hourly_rate = pipeline.analyze_hourly_profile(gaps)
+    hourly_rate = pipeline.analyze_hourly_profile(gaps, df_clean)
     
-    prob_single, mix_p = pipeline.fit_global_distribution(gaps)
+    day_params = pipeline.fit_regime_distribution(gaps, regime='day')
+    night_params = pipeline.fit_regime_distribution(gaps, regime='night')
     
-    gen = RealisticMaskGenerator(hourly_rate, prob_single, mix_p)
+    gen = RealisticMaskGenerator(hourly_rate, day_params, night_params)
     return gen
+
+

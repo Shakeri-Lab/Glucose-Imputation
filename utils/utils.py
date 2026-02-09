@@ -27,16 +27,16 @@ def set_seed(seed=42):
 
 
 
-
 def load_data(args):
     """ Load dataset. """
     logging.info(f"Loading dataset from {args.data_path}")    
     all_dataset_dict = {'org': {}, 'missed': {}}    
     for splt in ['train', 'val', 'test']:
-        raw_dataset = CGMDataset(data_path=os.path.join(args.data_path, splt + '.csv'), seq_len=args.seq_len, stride=args.stride, missing_enabled=True, miss_cfg=args.miss_config, is_pedap=args.is_pedap)
+        missing_enabled = True if (args.is_pedap and not args.missing_enabled and splt in ['val', 'test']) else args.missing_enabled
+        raw_dataset = CGMDataset(data_path=os.path.join(args.data_path, splt + '.csv'), seq_len=args.seq_len, stride=args.stride, missing_enabled=missing_enabled, miss_cfg=args.miss_config, is_pedap=args.is_pedap)
         
-        meal = raw_dataset[:, :, 1].unsqueeze(-1)
-        time_embed = raw_dataset[:, :, 2:4]
+        exg_intrv = raw_dataset[:, :, 1:4]
+        time_embed = raw_dataset[:, :, 4:6]
 
         for key in ['org', 'missed']:
             if key == 'missed':
@@ -45,7 +45,7 @@ def load_data(args):
                 raw_signal = raw_dataset[:, :, -1]
 
             signal = raw_signal.unsqueeze(-1)
-            processed_data = torch.cat([signal, meal, time_embed], dim=2)            
+            processed_data = torch.cat([signal, exg_intrv, time_embed], dim=2)            
             all_dataset_dict[key][splt] = processed_data
 
     return all_dataset_dict
@@ -89,7 +89,7 @@ def visualize_imputation(truth, truth_org, imp, mask, s_idx=0, f_idx=0, title="I
         ax.legend(loc="upper right")
         ax.grid(True, alpha=0.3)
         
-        plt.savefig(os.path.join(plot_dir, f"plots/{title}_{s_idx}_{f_idx}_i{i}.png"))
+        plt.savefig(os.path.join(plot_dir, f"{title}_{s_idx}_{f_idx}_i{i}.png"))
         plt.close()
 
 

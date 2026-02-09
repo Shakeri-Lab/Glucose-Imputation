@@ -18,13 +18,14 @@ class CGMDataset(Dataset):
 
         if is_pedap:
             self.df = self.df.loc[:, ~self.df.columns.duplicated()]
+            self.df.rename(columns={'bolus_extended': 'bolus'}, inplace=True)
             self.df['date'] = pd.to_datetime(self.df['date'], format='%Y-%m-%d %H:%M:%S')
             
         if self.miss_cfg['is_real_mask']: self.real_mask_gen = init_train_masking(miss_cfg['csv_list'], miss_cfg['valid_threshold'])
             
         if not self.missing_enabled: self.df['cgm_simulated'] = self.df['cgm'].copy() 
 
-        self.samples = self._build_samples_dclp3() if is_pedap else self._build_samples()
+        self.samples = self._build_samples_pedap() if is_pedap else self._build_samples()
 
     def _absolute_time_encoding(self, indices, T_day=288):
         t = indices.float() / float(T_day)
@@ -41,7 +42,7 @@ class CGMDataset(Dataset):
             samples.extend(self._generate_samples(group))
         return np.array(samples)
         
-    def _build_samples_dclp3(self):
+    def _build_samples_pedap(self):
         samples = []
         for pid, group in self.df.groupby('pat_id'):
             for seq_id, episode in group.groupby('seq_id'):
@@ -57,7 +58,7 @@ class CGMDataset(Dataset):
                 if self.miss_cfg['is_real_mask']: 
                     slice_df = self.real_mask_gen.generate_mask(group.iloc[i : i + self.seq_len])
                 else:
-                    slice_df = simulate_experiment_pipeline(group.iloc[i : i + self.seq_len], self.miss_cfg['type'])
+                    slice_df = simulate_experiment_pipeline(group.iloc[i : i + self.seq_len], self.miss_cfg)
             else:
                 slice_df = group.iloc[i : i + self.seq_len]
 
@@ -65,8 +66,10 @@ class CGMDataset(Dataset):
                 
             slice_in = slice_df['cgm_simulated'].values
             slice_gt = slice_df['cgm'].values
-            slice_meal = np.where(slice_df['meal'].values > 0, 1, 0)
-
+            slice_meal = self._skew_norm(np.where(slice_df['meal'].values > 0, 1, 0), skew=1, min_val=0.0, max_val=1)
+            slice_basal = self._skew_norm(slice_df['basal'].values, skew=0.25, min_val=0.0, max_val=10.0)
+            slice_bolus = self._skew_norm(slice_df['bolus'].values, skew=0.25, min_val=0.0, max_val=10.0)
+            
             if np.isnan(slice_gt).any(): continue
                 
             dates = pd.to_datetime(slice_df['date'])
@@ -77,7 +80,7 @@ class CGMDataset(Dataset):
             norm_in = self._skew_norm(slice_in) 
             norm_gt = self._skew_norm(slice_gt)
             
-            sample = np.column_stack([norm_in, slice_meal, time_embeds, norm_gt])
+            sample = np.column_stack([norm_in, slice_meal, slice_bolus, slice_basal, time_embeds, norm_gt])
             samples.append(sample)
 
         return samples

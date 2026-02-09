@@ -793,3 +793,467 @@
 #         df['cgm_simulated'] = df['cgm'].copy()
 #     return process_single_day_experiment(df, experiment_mode=mode)
 
+
+
+
+
+
+
+# import pandas as pd
+# import numpy as np
+# import matplotlib.pyplot as plt
+# from scipy.stats import gamma
+# from scipy.optimize import curve_fit
+
+# class MISSINGNESS_PATTERN:
+#     def __init__(self, datapath_list, target_col='Value'):
+#         self.df = pd.concat([pd.read_csv(csv) for csv in datapath_list], axis=0, ignore_index=True)
+        
+#         self.df['DT_Index'] = pd.to_datetime(self.df['DT_Index'])
+#         self.target_col = target_col
+#         self.df[self.target_col] = pd.to_numeric(self.df[self.target_col], errors='coerce')
+        
+#     def resampling(self):
+#         def enforce_5min(group):
+#             group = group.drop_duplicates(subset='DT_Index')
+#             group = group.set_index('DT_Index')
+#             group = group.sort_index()
+
+#             if group.empty: return group
+
+#             start_time = group.index.min().floor('D')
+#             end_time = group.index.max().ceil('D') - pd.Timedelta(minutes=5)
+#             full_grid = pd.date_range(start=start_time, end=end_time, freq='5min', name='DT_Index')
+            
+#             return group.reindex(full_grid)
+
+#         df_regular = self.df.groupby('SID').apply(enforce_5min)        
+        
+#         if 'SID' in df_regular.columns: df_regular = df_regular.drop(columns=['SID'])
+#         df_regular = df_regular.reset_index()
+#         if 'DT_Index' not in df_regular.columns and 'level_1' in df_regular.columns:
+#             df_regular = df_regular.rename(columns={'level_1': 'DT_Index'})
+            
+#         return df_regular
+
+#     def filter_valid_days(self, df, threshold=0.50):
+#         """
+#         Removes 'Ghost Days' (low adherence) so they don't corrupt the gap analysis.
+#         Standard requirement: >70% data (approx 200/288 points).
+#         """
+#         expected_points = 288
+#         min_required = expected_points * threshold
+        
+#         df_clean = df.copy()
+#         df_clean['Date'] = df_clean['DT_Index'].dt.date
+        
+#         daily_counts = df_clean.groupby(['SID', 'Date'])[self.target_col].count()
+#         valid_days = daily_counts[daily_counts >= min_required].index
+        
+#         df_clean = df_clean.set_index(['SID', 'Date'])
+#         df_filtered = df_clean.loc[df_clean.index.isin(valid_days)].reset_index()
+        
+#         return df_filtered
+
+#     def analyze_gaps(self, rs_df):
+#         gap_data = []
+#         for sid, grp in rs_df.groupby('SID'):
+#             mask = grp[self.target_col].isna()
+#             blocks = (mask != mask.shift()).cumsum()
+            
+#             gap_summary = grp[mask].groupby(blocks).agg(
+#                 Start_Time=('DT_Index', 'first'),
+#                 Count=('DT_Index', 'size')
+#             )
+            
+#             gap_summary['Duration_Min'] = gap_summary['Count'] * 5
+#             gap_summary['SID'] = sid
+#             gap_summary['Hour_of_Day'] = gap_summary['Start_Time'].dt.hour
+#             gap_summary['Date'] = gap_summary['Start_Time'].dt.date
+            
+#             gap_data.append(gap_summary)
+
+#         if gap_data:
+#             return pd.concat(gap_data).reset_index(drop=True)
+#         else:
+#             return pd.DataFrame()
+
+#     def analyze_hourly_profile(self, gap_stats):
+#         """
+#         Calculates the 'When': Probability of a gap starting at Hour X.
+#         """
+#         counts = gap_stats['Hour_of_Day'].value_counts().sort_index()
+#         probs = counts / counts.sum()
+#         return probs.reindex(range(24), fill_value=0)
+
+
+#     def fit_global_distribution(self, gaps):
+#         """
+#         Fits the distribution in two parts:
+#         1. Exact probability of 'Single Drops' (5 min).
+#         2. Mixture Model (Exp + Gauss + Uniform Offset) for 'Real Gaps' (>5 min).
+#         """
+#         all_data = gaps['Duration_Min'].values
+        
+#         n_total = len(all_data)
+#         n_single = np.sum(all_data <= 5)
+#         prob_single = n_single / n_total if n_total > 0 else 0
+#         tail_data = all_data[all_data > 5]
+        
+#         if len(tail_data) == 0: return prob_single, None
+
+#         counts, bin_edges = np.histogram(tail_data, bins=47, density=True)
+#         bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+        
+#         def mixture_func(x, A, k, B, mu, sigma, C):
+#             exp_part = A * np.exp(-k * x)
+#             gauss_part = B * np.exp(-((x - mu)**2) / (2 * sigma**2))
+#             return exp_part + gauss_part + C
+
+#         p0 = [np.max(counts), 0.05, np.max(counts)/10, 120, 20, 0.005]
+        
+#         bounds = ([0, 0.001, 0, 60, 5, 0], [np.inf, 0.2, np.inf, 240, 60, 0.01])
+
+#         try:
+#             mix_params, _ = curve_fit(mixture_func, bin_centers, counts, 
+#                                     p0=p0, bounds=bounds, maxfev=10000)
+#             print("Tail Mixture Model (with Offset) Fitted Successfully.")
+#         except RuntimeError:
+#             print("Mixture fit failed.")
+#             mix_params = None
+
+#         return prob_single, mix_params
+
+
+# class RealisticMaskGenerator:
+#     def __init__(self, hourly_rate, prob_single, mix_params):
+#         self.hourly_probs = hourly_rate.values if hasattr(hourly_rate, 'values') else hourly_rate
+#         self.prob_single = prob_single
+#         self.use_mixture = (mix_params is not None)
+        
+#         if self.use_mixture:
+#             self.A, self.k, self.B, self.mu, self.sigma, self.C = mix_params
+#             area_exp = (self.A / self.k) * np.exp(-self.k * 5)            
+#             area_gauss = self.B * self.sigma * np.sqrt(2 * np.pi)            
+#             area_unif = self.C * (240 - 5)
+            
+#             total_area = area_exp + area_gauss + area_unif
+            
+#             self.p_exp = area_exp / total_area
+#             self.p_gauss = area_gauss / total_area
+
+#     def sample_duration(self):
+#         """Decides 'How Long' using the Two-Stage logic."""
+#         if np.random.rand() < self.prob_single: return 5.0
+#         if self.use_mixture:
+#             r = np.random.rand()
+#             if r < self.p_exp:
+#                 duration = np.random.exponential(scale=(1 / self.k)) + 5
+#             elif r < (self.p_exp + self.p_gauss):
+#                 duration = np.random.normal(loc=self.mu, scale=self.sigma)                
+#             else:
+#                 duration = np.random.uniform(10, 240)
+#             return max(10, min(duration, 1440))
+#         return 10.0
+
+#     def generate_mask(self, df_slice, points_per_hour=12):
+#         """Creates a boolean mask (0=Missing, 1=Observed)."""  
+#         df_slice = df_slice.copy()
+#         if 'cgm_simulated' not in df_slice.columns: df_slice['cgm_simulated'] = df_slice['cgm'].copy()
+#         dt_series = pd.to_datetime(df_slice['date'])
+#         hour_list = dt_series.dt.hour.unique()
+#         start_minute = dt_series.dt.minute.iloc[0]        
+#         total_points = len(df_slice)
+#         drop_mask = np.zeros(total_points, dtype=bool)
+        
+#         for i, hour in enumerate(hour_list):
+#             if np.random.rand() < self.hourly_probs[hour]:
+#                 duration_mins = self.sample_duration()
+#                 duration_points = int(round(duration_mins / 5))
+                
+#                 if duration_points > 0:
+#                     low_limit = int(start_minute / 5) if i == 0 else 0                    
+#                     if low_limit >= points_per_hour: continue
+
+#                     start_offset = np.random.randint(low_limit, points_per_hour)
+#                     hour_indices = np.where(dt_series.dt.hour == hour)[0]
+                    
+#                     if len(hour_indices) > 0:
+#                         base_idx = hour_indices[0]
+#                         abs_start = base_idx + start_offset
+#                         abs_end = min(abs_start + duration_points, total_points)
+    
+#                         drop_mask[abs_start : abs_end] = True
+
+#         if 'cgm_simulated' in df_slice.columns: df_slice.loc[drop_mask, 'cgm_simulated'] = np.nan  
+#         return df_slice
+
+
+# def init_train_masking(csv_list, threshold):
+#     """ Init training real-world masking. """
+    
+#     pipeline = MISSINGNESS_PATTERN(csv_list)
+#     df_resampled = pipeline.resampling()
+#     df_clean = pipeline.filter_valid_days(df_resampled, threshold=threshold)
+#     gaps = pipeline.analyze_gaps(df_clean)
+#     hourly_rate = pipeline.analyze_hourly_profile(gaps)
+    
+#     prob_single, mix_p = pipeline.fit_global_distribution(gaps)
+    
+#     gen = RealisticMaskGenerator(hourly_rate, prob_single, mix_p)
+#     return gen
+
+
+
+
+
+
+# def apply_protocol_B_hidden_peak(drop_mask, day_df, missing_config, POINTS_PER_HOUR=12):
+#     """
+#     Protocol B: Hidden Peak Mask.
+#     Masks post-prandial peaks with RANDOM window lengths centered on the peak.
+#     """
+#     T, cgm_values = len(day_df), day_df['cgm'].values
+    
+#     MIN_WINDOW_LEN, MAX_WINDOW_LEN = int(2.5 * POINTS_PER_HOUR), int(3.0 * POINTS_PER_HOUR) 
+#     min_total_points, max_total_points = int(T * missing_config['min']), int(T * missing_config['max'])
+#     target_total_points = np.random.randint(min_total_points, max_total_points + 1)
+
+#     peak_candidates = []
+#     for meal_idx in np.where(day_df['meal'] > 0)[0]:
+#         search_end = min(meal_idx + 24, T)
+#         if search_end > meal_idx: peak_candidates.append(meal_idx + np.argmax(cgm_values[meal_idx : search_end]))
+
+#     if not peak_candidates: return drop_mask
+#     points_added = 0
+#     np.random.shuffle(peak_candidates)
+#     for peak_idx in peak_candidates:
+#         if points_added >= target_total_points: break
+
+#         current_window_len = np.random.randint(MIN_WINDOW_LEN, MAX_WINDOW_LEN + 1)
+#         start_idx = max(0, peak_idx - (current_window_len // 2))
+#         end_idx = min(T, start_idx + current_window_len)
+#         actual_len = end_idx - start_idx
+
+#         if not drop_mask[start_idx : end_idx].any():
+#             if (points_added + actual_len) <= target_total_points:
+#                 drop_mask[start_idx : end_idx] = True
+#                 points_added += actual_len
+
+#     return drop_mask
+
+
+# def apply_protocol_A_homeostatic(drop_mask, day_df, missing_config, POINTS_PER_HOUR=12):
+#     """
+#     Protocol A: Steady-State Mask.
+#     Fills stable areas with RANDOM window lengths (within a range)
+#     until the Total Target is met.
+#     """
+#     T = len(day_df)
+#     cgm_values, meal_values, bolus_values = day_df['cgm'].values, day_df['meal'].values, day_df['bolus'].values
+    
+#     MIN_WINDOW_LEN, MAX_WINDOW_LEN = int(1.0 * POINTS_PER_HOUR), int(2.0 * POINTS_PER_HOUR) 
+#     min_total_points, max_total_points = int(T * missing_config['min']), int(T * missing_config['max'])
+#     target_total_points = np.random.randint(min_total_points, max_total_points + 1)
+
+#     valid_starts = []
+#     gradients = np.abs(np.gradient(cgm_values))
+#     is_stable = gradients < 2.0 
+    
+#     for t in range(T - MAX_WINDOW_LEN):
+#         window_meal = meal_values[t : t + MAX_WINDOW_LEN]
+#         window_bolus = bolus_values[t : t + MAX_WINDOW_LEN]
+#         window_stable = is_stable[t : t + MAX_WINDOW_LEN]
+#         if ((np.sum(window_meal) == 0) and (np.sum(window_bolus) == 0)) and (np.mean(window_stable) > 0.8): valid_starts.append(t)
+            
+#     if not valid_starts: return drop_mask 
+#     points_added = 0
+#     np.random.shuffle(valid_starts)
+#     for start_idx in valid_starts:
+#         if points_added >= target_total_points: break
+#         current_window_len = np.random.randint(MIN_WINDOW_LEN, MAX_WINDOW_LEN + 1)        
+#         end_idx = start_idx + current_window_len
+        
+#         if not drop_mask[start_idx : end_idx].any():
+#             if (points_added + current_window_len) <= target_total_points:
+#                 drop_mask[start_idx : end_idx] = True
+#                 points_added += current_window_len
+                
+#     return drop_mask
+
+
+
+
+
+
+# def process_single_day_experiment(day_df, experiment_mode='A', protocol_mask_ratio=0.1):
+#     """
+#     Master function to apply specific experimental protocols.
+#     """
+#     df_day = day_df.copy()
+#     total_points = len(df_day)
+#     drop_mask = np.zeros(total_points, dtype=bool)
+    
+#     config_A = {'min': protocol_mask_ratio, 'max': protocol_mask_ratio}
+#     config_B = {'min': protocol_mask_ratio, 'max': protocol_mask_ratio}
+    
+#     if experiment_mode == 'A':
+#         drop_mask = apply_protocol_A_homeostatic(drop_mask, df_day, config_A)
+#     elif experiment_mode == 'B':
+#         drop_mask = apply_protocol_B_hidden_peak(drop_mask, df_day, config_B)
+#     elif experiment_mode == 'C':
+#         drop_mask = apply_protocol_C_TCR(drop_mask, df_day)
+#     elif experiment_mode == 'Mixed':
+#         choice_prob = np.random.rand()
+#         if choice_prob < 0.2:
+#             drop_mask = apply_protocol_A_homeostatic(drop_mask, df_day, config_A)
+#         elif choice_prob < 0.5:
+#             drop_mask = apply_protocol_B_hidden_peak(drop_mask, df_day, config_B)
+#         else:
+#             drop_mask = apply_protocol_A_homeostatic(drop_mask, df_day, config_A)
+#             drop_mask = apply_protocol_B_hidden_peak(drop_mask, df_day, config_B)
+            
+#     if 'cgm_simulated' in df_day.columns:
+#         col_loc = df_day.columns.get_loc('cgm_simulated')
+#         df_day.iloc[drop_mask, col_loc] = np.nan
+    
+#     return df_day
+
+
+
+
+import numpy as np
+import pandas as pd
+from .protocol_B import apply_protocol_B_hidden_peak_engine
+from .protocol_A import apply_protocol_A_homestatic_engine
+
+# def apply_protocol_A_homeostatic(drop_mask, day_df, missing_config, BASE_WINDOW_LEN=6):
+#     """
+#     Protocol A: Steady-State Mask.
+#     Fills stable areas with fixed window lengths.
+#     """
+#     temp_mask = drop_mask.copy() 
+#     points_added, valid_starts, T = 0, [], len(day_df)
+    
+#     cgm_values, meal_values, bolus_values = day_df['cgm'].values, day_df['meal'].values, day_df['bolus'].values    
+#     target_total_points = np.random.randint(int(T * missing_config['min']), int(T * missing_config['max']) + 1)
+
+#     gradients = np.abs(np.gradient(cgm_values))
+#     is_stable = gradients < 2.5
+    
+#     for t in range(T - BASE_WINDOW_LEN + 1):
+#         window_meal = meal_values[t : t + BASE_WINDOW_LEN]
+#         window_bolus = bolus_values[t : t + BASE_WINDOW_LEN]
+#         window_stable = is_stable[t : t + BASE_WINDOW_LEN]
+        
+#         if ((np.sum(window_meal) == 0) and (np.sum(window_bolus) == 0) and (np.mean(window_stable) > 0.8)): valid_starts.append(t)
+
+#     if len(valid_starts) * BASE_WINDOW_LEN < target_total_points: return drop_mask
+
+#     np.random.shuffle(valid_starts)    
+#     for start_idx in valid_starts:
+#         if points_added >= target_total_points: break
+
+#         points_remaining = target_total_points - points_added        
+#         current_len = min(BASE_WINDOW_LEN, points_remaining)
+#         end_idx = start_idx + current_len
+
+#         if not temp_mask[start_idx : end_idx].any():
+#             temp_mask[start_idx : end_idx] = True
+#             points_added += current_len
+#     if points_added < target_total_points: return drop_mask
+#     return temp_mask
+
+
+def apply_protocol_A_homeostatic(drop_mask, day_df, missing_config, BASE_WINDOW_LEN=6, LOOKBACK=12):
+    """
+    Protocol A: Steady-State Mask.
+    Fills stable areas with fixed window lengths, avoiding excursion periods.
+    """
+    drop_mask = apply_protocol_A_homestatic_engine(drop_mask, day_df, missing_config, BASE_WINDOW_LEN=6, LOOKBACK=12)
+    return drop_mask
+
+def apply_protocol_B_hidden_peak(drop_mask, day_df, missing_config, POINTS_PER_HOUR=12):
+    """
+    Protocol B: Hidden Peak Mask.
+    Masks post-prandial peaks centered on the peak location.
+    """
+    drop_mask = apply_protocol_B_hidden_peak_engine(drop_mask, day_df, missing_config)
+    return drop_mask
+
+# def apply_protocol_C_TCR(drop_mask, day_df):
+#     """
+#     Protocol C: Masks during TCR activations if hypoglycemia occurs.
+#     """
+
+#     cgm = day_df['cgm'].values
+#     tcr_flag = day_df['tcr_flag'].values.astype('bool') 
+#     if (cgm[tcr_flag] < 70).any(): drop_mask = tcr_flag
+#     print(drop_mask)
+#     return drop_mask
+
+
+
+def apply_protocol_C_TCR(drop_mask, day_df):
+    """
+    Protocol C: Masks 1-hour window around hypoglycemia during TCR activations.
+    """
+    cgm = day_df['cgm'].values
+    tcr_flag = day_df['tcr_flag'].values.astype('bool')
+    
+    low_during_tcr = tcr_flag & (cgm < 70)
+    
+    if low_during_tcr.any():
+        low_indices = np.where(low_during_tcr)[0]
+        window_size = 6 
+        
+        for idx in low_indices:
+            start = max(0, idx - window_size)
+            end = min(len(cgm), idx + window_size + 1)
+            drop_mask[start:end] = True
+    
+    return drop_mask
+
+
+
+
+def process_single_day_experiment(day_df, miss_config):
+    """
+    Master function to apply specific experimental protocols.
+    """
+    experiment_mode, protocol_mask_ratio =  miss_config['type'], miss_config['protocol_mask_ratio']
+    df_day = day_df.copy()
+    total_points = len(df_day)
+    drop_mask = np.zeros(total_points, dtype=bool)
+    
+    config_A = {'min': protocol_mask_ratio, 'max': protocol_mask_ratio}
+    
+    if experiment_mode == 'A':
+        drop_mask = apply_protocol_A_homeostatic(drop_mask, df_day, config_A)
+    elif experiment_mode == 'B':
+        drop_mask = apply_protocol_B_hidden_peak(drop_mask, df_day, miss_config)
+    elif experiment_mode == 'C':
+        drop_mask = apply_protocol_C_TCR(drop_mask, df_day)
+    elif experiment_mode == 'Mixed':
+        choice_prob = np.random.rand()
+        if choice_prob < 0.2:
+            drop_mask = apply_protocol_A_homeostatic(drop_mask, df_day, config_A)
+        elif choice_prob < 0.5:
+            drop_mask = apply_protocol_B_hidden_peak(drop_mask, df_day, miss_config)
+        else:
+            drop_mask = apply_protocol_A_homeostatic(drop_mask, df_day, config_A)
+            drop_mask = apply_protocol_B_hidden_peak(drop_mask, df_day, miss_config)
+            
+    if 'cgm_simulated' in df_day.columns:
+        col_loc = df_day.columns.get_loc('cgm_simulated')
+        df_day.iloc[drop_mask, col_loc] = np.nan
+    
+    return df_day
+
+
+
+def simulate_experiment_pipeline(df, miss_config):
+    df = df.copy()
+    if 'cgm_simulated' not in df.columns:
+        df['cgm_simulated'] = df['cgm'].copy()
+    return process_single_day_experiment(df, miss_config)
