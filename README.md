@@ -2,10 +2,10 @@
 
 **Stationarity Bias · Scenarios A / B / C · Slurm + Optuna + PyPOTS**
 
-> **Paper:** *The Stationarity Bias: Stratified Stress-Testing for Time-Series Imputation in Regulated Dynamical Systems*
+<!-- > **Paper:** *The Stationarity Bias: Stratified Stress-Testing for Time-Series Imputation in Regulated Dynamical Systems*
 > Amirreza Dolatpour Fathkouhi, Alireza Namazi, Heman Shakeri
 > KDD 2026, Jeju, Korea
-> Code: [github.com/Shakeri-Lab/Glucose-Imputation](https://github.com/Shakeri-Lab/Glucose-Imputation)
+> Code: [github.com/Shakeri-Lab/Glucose-Imputation](https://github.com/Shakeri-Lab/Glucose-Imputation) -->
 
 ---
 
@@ -368,6 +368,6 @@ If you have any questions or issues running the code, don't hesitate to reach ou
 
 ---
 
-## Reference
+<!-- ## Reference
 
-Amirreza Dolatpour Fathkouhi, Alireza Namazi, and Heman Shakeri. 2026. *The Stationarity Bias: Stratified Stress-Testing for Time-Series Imputation in Regulated Dynamical Systems.* In Proceedings of the 32nd ACM SIGKDD Conference on Knowledge Discovery and Data Mining (KDD '26). ACM, Jeju, Korea.
+Amirreza Dolatpour Fathkouhi, Alireza Namazi, and Heman Shakeri. 2026. *The Stationarity Bias: Stratified Stress-Testing for Time-Series Imputation in Regulated Dynamical Systems.* In Proceedings of the 32nd ACM SIGKDD Conference on Knowledge Discovery and Data Mining (KDD '26). ACM, Jeju, Korea. -->
