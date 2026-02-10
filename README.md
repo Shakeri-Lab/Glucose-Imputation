@@ -138,7 +138,10 @@ The DCLP3, DCLP5, and PEDAP clinical datasets can be downloaded from the Jaeb Ce
 
 The UVA/Padova Simulation and TCR-Simulation datasets will be available for download soon.
 
-All optimized hyperparameters and trained model checkpoints are available at: `<link>`
+All optimized hyperparameters and trained model checkpoints are available at:
+**https://myuva-my.sharepoint.com/:f:/g/personal/aww9gh_virginia_edu/IgCoABI3SmJzQrGXDZKyl0G1AZuLXYe2nO05kiXvYIguzUQ?e=Of08bF**
+
+After downloading, simply set `saving_path` in your configuration to the downloaded directory and run the evaluation pipeline directly.
 
 ### 5.1 PEDAP (Pediatric Artificial Pancreas)
 
@@ -340,8 +343,9 @@ When `True`, the pipeline uses the **Raw PEDAP** and **Processed PEDAP** dataset
 
 ## 15. Output Structure
 
-All outputs — training artifacts, Optuna logs, and scenario evaluation results — are stored under a single directory: https://myuva-my.sharepoint.com/:f:/g/personal/aww9gh_virginia_edu/IgCoABI3SmJzQrGXDZKyl0G1AZuLXYe2nO05kiXvYIguzUQ?e=Of08bF
+All outputs — training artifacts, Optuna logs, and scenario evaluation results — are stored under a single directory:
 
+**https://myuva-my.sharepoint.com/:f:/g/personal/aww9gh_virginia_edu/IgCoABI3SmJzQrGXDZKyl0G1AZuLXYe2nO05kiXvYIguzUQ?e=Of08bF**
 
 ```
 Mixed/
@@ -360,4 +364,10 @@ The following are held constant across all experiments:
 - Identical compute resources
 - Fixed random seed (7)
 
-**Model architecture is the only degree of freedom.**
+If you have any questions or issues running the code, don't hesitate to reach out: **aww9gh@virginia.edu**
+
+---
+
+## Reference
+
+Amirreza Dolatpour Fathkouhi, Alireza Namazi, and Heman Shakeri. 2026. *The Stationarity Bias: Stratified Stress-Testing for Time-Series Imputation in Regulated Dynamical Systems.* In Proceedings of the 32nd ACM SIGKDD Conference on Knowledge Discovery and Data Mining (KDD '26). ACM, Jeju, Korea.
