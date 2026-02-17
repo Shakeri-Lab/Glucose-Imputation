@@ -7,10 +7,10 @@
 #SBATCH --mem=100000
 #SBATCH --time=00:20:00
 #SBATCH --partition=gpu
-#SBATCH -A cdt_computing
-#SBATCH --array=0-11
-#SBATCH --output=logs/train-out_%A_%a.log
-#SBATCH --error=logs/train-err_%A_%a.log
+#SBATCH -A shakeri-lab
+#SBATCH --array=0
+#SBATCH --output=new_logs/train-out_%A_%a.log
+#SBATCH --error=new_logs/train-err_%A_%a.log
 
 
 # MODEL_NAMES=("SAITS" "SCINet" "TimeMixer" "TSLANet" "TEFN" "TOTEM" "GPT4TS" "Lerp" "LOCF" "Median" "Mean")
@@ -19,9 +19,11 @@
 
 # MODEL_NAMES=("SAITS" "FreTS" "CSDI" "SCINet" "TimeMixer" "TimeMixerPP" "TSLANet" "TEFN" "TOTEM" "GPT4TS")
 # MODEL_NAMES=("SAITS" "FreTS" "CSDI" "SCINet" "TimeMixer" "TimeMixerPP" "TSLANet" "TEFN" "TOTEM" "GPT4TS" "Lerp" "LOCF" "Median" "Mean")
-MODEL_NAMES=("SAITS" "FreTS" "SCINet" "TimeMixer" "TSLANet" "TEFN" "TOTEM" "GPT4TS" "Lerp" "LOCF" "Median" "Mean")
+# MODEL_NAMES=("SAITS" "FreTS" "SCINet" "TimeMixer" "TSLANet" "TEFN" "TOTEM" "GPT4TS" "Lerp" "LOCF" "Median" "Mean")
+# MODEL_NAMES=("SAITS" "FreTS" "SCINet" "Lerp")
 
-# MODEL_NAMES=("Lerp")
+MODEL_NAMES=("SAITS")
+
 export PYTHONHASHSEED=7
 
 # MODEL_NAMES=("SAITS" "FreTS" "SCINet" "TimeMixer" "TSLANet" "TEFN" "TOTEM" "GPT4TS")
@@ -31,7 +33,7 @@ PARAM_RANGE_FILE="param_range.json"
 CONFIG_FILE="config.yml"
 NUM_TRIALS=40
 
-mkdir -p "logs"
+mkdir -p "new_logs"
 
 model=${MODEL_NAMES[$SLURM_ARRAY_TASK_ID]}
 

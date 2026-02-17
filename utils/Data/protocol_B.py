@@ -64,8 +64,8 @@ def _calculate_mask_bounds(meal_start, peak_idx, T, missing_config, POINTS_PER_H
     Calculates mask bounds to CENTER the peak within the window.
     Maximize difficulty for linear interpolation.
     """
-    min_wlen = int(float(missing_config.get("min_mask_hours", 3.5)) * POINTS_PER_HOUR)
-    max_wlen = int(float(missing_config.get("max_mask_hours", 4)) * POINTS_PER_HOUR)
+    min_wlen = int(float(missing_config.get("min_length_B", 3.5)) * POINTS_PER_HOUR)
+    max_wlen = int(float(missing_config.get("max_length_B", 4)) * POINTS_PER_HOUR)
 
     target_wlen = np.random.randint(min_wlen, max_wlen + 1)    
     wlen = min(target_wlen, T - meal_start)

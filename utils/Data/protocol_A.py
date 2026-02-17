@@ -1,14 +1,15 @@
 import numpy as np
 import pandas as pd
 
-def apply_protocol_A_homestatic_engine(drop_mask, day_df, missing_config, BASE_WINDOW_LEN=6, LOOKBACK=12):
+def apply_protocol_A_homestatic_engine(drop_mask, day_df, nane_cgm, missing_config, BASE_WINDOW_LEN=6, LOOKBACK=12):
     """
     Protocol A: Steady-State Mask.
     Fills stable areas with fixed window lengths, avoiding excursion periods.
     """
     temp_mask = drop_mask.copy() 
     T = len(day_df)
-    
+
+    nane_cgm = None if nane_cgm is None else nane_cgm['cgm'].values
     cgm_values = day_df['cgm'].values
     meal_values = day_df['meal'].values
     bolus_values = day_df['bolus'].values
@@ -22,7 +23,7 @@ def apply_protocol_A_homestatic_engine(drop_mask, day_df, missing_config, BASE_W
     is_stable = gradients < 3.0
     
     valid_starts = _find_valid_windows(
-        cgm_values, meal_values, bolus_values, is_stable,
+        nane_cgm, cgm_values, meal_values, bolus_values, is_stable,
         T, BASE_WINDOW_LEN, LOOKBACK
     )
     
@@ -40,7 +41,7 @@ def apply_protocol_A_homestatic_engine(drop_mask, day_df, missing_config, BASE_W
     return temp_mask
 
 
-def _find_valid_windows(cgm_values, meal_values, bolus_values, is_stable, 
+def _find_valid_windows(nane_cgm, cgm_values, meal_values, bolus_values, is_stable, 
                         T, BASE_WINDOW_LEN, LOOKBACK):
     """
     Identifies all valid steady-state windows that meet homeostatic criteria.
@@ -55,14 +56,20 @@ def _find_valid_windows(cgm_values, meal_values, bolus_values, is_stable,
         window_bolus = bolus_values[t : t + BASE_WINDOW_LEN]
         window_cgm = cgm_values[t : t + BASE_WINDOW_LEN]
         window_stable = is_stable[t : t + BASE_WINDOW_LEN]
-        
+
+        if nane_cgm is not None:
+            window_nane_cgm = nane_cgm[t : t + BASE_WINDOW_LEN]
+            has_nane_events = np.any(np.isnan(window_nane_cgm))
+        else:
+            has_nane_events = False
+            
         no_recent_events = (np.sum(lookback_meal) == 0) and (np.sum(lookback_bolus) == 0)
         no_current_events = (np.sum(window_meal) == 0) and (np.sum(window_bolus) == 0)
         stable_gradient = np.mean(window_stable) >= 0.85
         cgm_range = np.ptp(window_cgm) < 25
         cgm_in_normal_range = (window_cgm >= 70).all() and (window_cgm <= 140).all()
         
-        if no_recent_events and no_current_events and stable_gradient and cgm_range and cgm_in_normal_range:
+        if no_recent_events and no_current_events and stable_gradient and cgm_range and cgm_in_normal_range and (not has_nane_events):
             valid_starts.append(t)
     
     return valid_starts
