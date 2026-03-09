@@ -272,50 +272,136 @@ Defines model-specific hyperparameter ranges and ensures Optuna samples only val
 
 ## 12. Reproduction Pipeline
 
-### Step 1 — Optuna Training (Mixed)
-
-```bash
-NUM_TRIALS=40
-
-python hyperparameter_engine.py \
-  --model_name MODEL_NAME \
-  --ParamRangeDir param_range.json \
-  --config-path config.yml \
-  --NTrials $NUM_TRIALS
-```
-
-### Step 2 — Train Best Model
-
-```bash
-python hyperparameter_engine.py \
-  --model_name MODEL_NAME \
-  --ParamRangeDir param_range.json \
-  --config-path config.yml \
-  --NTrials $NUM_TRIALS \
-  --train_best
-```
-
-### Step 3 — Scenario Evaluation (A / B / C)
-
-```bash
-python hyperparameter_engine.py \
-  --model_name MODEL_NAME \
-  --config-path config.yml \
-  --is_evaluate
-```
-
-Run this step **once per scenario**.
+Three SLURM scripts cover the full pipeline. All scripts activate the shared virtual environment
+and write logs to `new_logs/` or `test_logs/`.
 
 ---
 
-## 13. Slurm Execution Strategy
+### Stage 1 — Hyperparameter Search + Evaluation (`slurm.sh`)
 
-| Stage                 | Slurm Pattern             |
-| --------------------- | ------------------------- |
-| Training / Train-Best | One model per array task  |
-| Evaluation            | Separate job per scenario |
+Runs Optuna HPO on a single model, then immediately evaluates the best configuration under the
+active scenario defined in `config.yml`.
 
-This guarantees isolation and reproducibility.
+**Computing resources:** 1 GPU · 10 CPUs · 100 GB RAM · 20 min
+
+```bash
+# Set MODEL_NAMES and --array in slurm.sh, then submit:
+sbatch slurm.sh
+```
+
+The script executes:
+
+```bash
+python hyperparameter_engine.py \
+  --model_name "$model" \
+  --ParamRangeDir param_range.json \
+  --config-path config.yml \
+  --NTrials 40 \
+  --is_evaluate
+```
+
+To train the best-found configuration instead of evaluating, swap `--is_evaluate` for `--train_best`.
+
+Supported model names (uncomment the desired list in `slurm.sh`):
+
+```
+SAITS  FreTS  SCINet  TimeMixer  TimeMixerPP  TSLANet  TEFN  TOTEM  GPT4TS  CSDI
+Lerp   LOCF   Median  Mean
+```
+
+---
+
+### Stage 2 — Full Ablation Study (`ablation_slurm.sh`)
+
+Sweeps every combination of scenario parameters across three datasets and four models in a single
+SLURM array job (one task per model).
+
+**Computing resources:** 1 GPU · 10 CPUs · 64 GB RAM · 72 h · `--array=0-3`
+
+```bash
+sbatch ablation_slurm.sh
+```
+
+**Models:** `SAITS  FreTS  SCINet  Lerp`
+
+**Datasets:**
+
+| Label        | Description                              | Flag         |
+|--------------|------------------------------------------|--------------|
+| `simulate`   | UVA/Padova simulation data               | *(none)*     |
+| `pedap`      | PEDAP clinical dataset                   | `--is_pedap` |
+| `none_pedap` | PEDAP (non-pedap evaluation split)       | `--is_pedap` |
+
+**Parameter sweep per scenario:**
+
+| Scenario | Parameter                        | Values swept                        |
+|----------|----------------------------------|-------------------------------------|
+| **A**    | `protocol_mask_ratio`            | `0.1  0.2  0.3  0.5`               |
+| **A**    | `window_scenario_A_length` (min) | `10  30  60`                        |
+| **B**    | `num_meal_hide`                  | `1  2  3`                           |
+| **B**    | `[min_length_B, max_length_B]` (hr) | `[1, 2]  [3.5, 4]  [5, 6]`      |
+| **C**    | `hypo_length` (min)              | `30  60  120`                       |
+
+Scenario C runs exclusively on the TCR dataset (`CGM_Imputation/tcr_data/`).
+
+The script calls `hyperparameter_engine.py` with `--is_evaluate --is_ablation` for every
+combination. Results are stored under `./DAY_NIGHT/`.
+
+---
+
+### Stage 3 — Test Best Models (`test_slurm.sh`)
+
+Runs final held-out test evaluation for seven models in parallel using pre-tuned hyperparameters
+from `best_hyperparameter.json`.
+
+**Computing resources:** 1 GPU · 10 CPUs · 100 GB RAM · 2 h · `--array=0-6`
+
+```bash
+sbatch test_slurm.sh
+```
+
+**Models (array index → model):**
+
+| Index | Model       |
+|-------|-------------|
+| 0     | SAITS       |
+| 1     | FreTS       |
+| 2     | Transformer |
+| 3     | CSDI        |
+| 4     | MRNN        |
+| 5     | GRUD        |
+| 6     | SCINet      |
+
+The script executes:
+
+```bash
+python hyperparameter_engine.py \
+  --model_name "$model" \
+  --ParamRangeDir best_hyperparameter.json \
+  --config-path config.yml \
+  --NTrials 40 \
+  --is_test
+```
+
+---
+
+## 13. Slurm Execution Summary
+
+| Script              | Purpose                          | Array   | Time   | Memory |
+|---------------------|----------------------------------|---------|--------|--------|
+| `slurm.sh`          | HPO + scenario evaluation        | `0`     | 20 min | 100 GB |
+| `ablation_slurm.sh` | Full parameter sweep (A / B / C) | `0-3`   | 72 h   | 64 GB  |
+| `test_slurm.sh`     | Held-out test with best params   | `0-6`   | 2 h    | 100 GB |
+
+**Key differences between scripts:**
+
+- `slurm.sh` uses `param_range.json`; `test_slurm.sh` uses `best_hyperparameter.json`.
+- `ablation_slurm.sh` loops over all scenario-parameter combinations internally — no manual re-submission needed.
+- All scripts set `PYTHONHASHSEED=7` for reproducibility.
+
+Logs are written to:
+- `new_logs/train-out_<jobid>_<taskid>.log` — training / ablation jobs
+- `test_logs/test-out_<jobid>_<taskid>.log` — test jobs
 
 ---
 
